@@ -1,0 +1,11 @@
+ Volume in drive D is Program
+ Volume Serial Number is 84B4-6E59
+
+ Directory of D:\Projects\bbb\H5SkillPredict
+
+02/11/2022  12:13 am    <DIR>          .
+02/11/2022  12:13 am    <DIR>          ..
+02/11/2022  12:13 am             1,799 .gitignore
+02/11/2022  12:13 am                 0 a.txt
+               2 File(s)          1,799 bytes
+               2 Dir(s)  527,554,695,168 bytes free
