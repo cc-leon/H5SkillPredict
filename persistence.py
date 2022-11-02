@@ -1,5 +1,6 @@
 import os
 
+
 class Persistence:
     FILE_NAME = "H5SkillPredict.txt"
 
@@ -8,7 +9,7 @@ class Persistence:
             with open(Persistence.FILE_NAME) as fp:
                 contents = tuple(line.rstrip() for line in fp)
         else:
-                contents = ("", )
+            contents = ("", )
 
         self.last_path = contents[0]
 
