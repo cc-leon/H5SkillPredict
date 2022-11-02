@@ -2,7 +2,7 @@ import os
 
 
 class Persistence:
-    FILE_NAME = "H5SkillPredict.txt"
+    FILE_NAME = "H5SkillPredict.ini"
 
     def __init__(self):
         if os.path.isfile(Persistence.FILE_NAME):
