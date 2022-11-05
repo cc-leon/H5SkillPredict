@@ -12,14 +12,8 @@ def main():
 
 
 def test():
-    from threading import Lock
-    aa = Lock()
+    pass
 
-    with aa:
-        print("aa")
-
-    with aa:
-        print("bb")
 
 if __name__ == "__main__":
     main()

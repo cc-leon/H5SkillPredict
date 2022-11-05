@@ -1,6 +1,4 @@
-import sys
 import logging
-import time
 from threading import Thread, Lock
 from tkinter import W, E, END
 from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext
@@ -121,7 +119,7 @@ class MainWnd(Tk):
         h5_path = "D:\\games\\TOE31\\"
         if h5_path == "":
             messagebox.showerror(TITLE, "本程序依赖已安装的英雄无敌5游戏数据！\n无游戏数据，退出。")
-            sys.exit(0)
+            self.destroy()
         self.per.last_path = h5_path
 
         self.game_info = None
