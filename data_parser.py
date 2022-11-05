@@ -6,7 +6,8 @@ from collections import namedtuple
 import pprint
 from zipfile import BadZipFile, ZipFile
 from io import BytesIO
-
+from threading import Lock
+1
 from PIL import Image
 
 
@@ -21,39 +22,60 @@ class RawData:
         self.h5_path = h5_path
         self.zip_q = None
         self.manifest = None
+        self.curr_stage = "估计中"
+        self.curr_prog = 0.0
+        self.total_prog = 1.0
+        self.lock = Lock()
 
+    def run(self):
         prev_timeit = time()
-
-        logging.info(f"开始\"{h5_path}\"的所有压缩文件扫描……")
+        logging.info(f"开始\"{self.h5_path}\"的所有压缩文件扫描……")
+        self._gen_stats()
         self._build_zip_list()
         logging.warning(f"压缩文件信息扫描完毕，发现{len(self.zip_q)}个文件，用时{time() - prev_timeit:.2f}秒。")
         prev_timeit = time()
 
+    def _gen_stats(self):
+        with self.lock:
+            self.total_prog = 0
+
+            for folder in RawData.DIRS:
+                fullpath = os.path.join(self.h5_path, folder)
+                if os.path.isdir(fullpath):
+                    self.total_prog += len(tuple(f for f in os.listdir(fullpath)
+                                                if f.lower().endswith(".pak") or f.lower().endswith(".h5m") or \
+                                                    f.lower().endswith(".h5u")))
+
+                elif folder == "data":
+                    raise ValueError(f"\"{self.h5_path}\"中没有找到\"{folder}\"")
+
     def _build_zip_list(self):
         temp = []
         self.manifest = {}
+        self.curr_prog = 0
 
         for folder in RawData.DIRS:
             fullpath = os.path.join(self.h5_path, folder)
+            with self.lock:
+                self.curr_stage = f"正在扫描{folder}文件夹"
 
-            if os.path.isdir(fullpath):
-                for f in os.listdir(fullpath):
-                    fullname = os.path.join(fullpath, f)
-                    if os.path.isfile(fullname):
-                        try:
-                            zip_file = ZipFile(fullname)
-                            temp.append((zip_file, os.path.getmtime(fullname)))
-                            logging.info(f"  在{folder}发现{f}")
+            for f in os.listdir(fullpath):
+                fullname = os.path.join(fullpath, f)
+                if os.path.isfile(fullname):
+                    try:
+                        zip_file = ZipFile(fullname)
+                        temp.append((zip_file, os.path.getmtime(fullname)))
+                        with self.lock:
+                            self.curr_prog += 1
+                        logging.info(f"  在{folder}发现{f}")
 
-                            namelist = zip_file.namelist()
-                            self.manifest[fullname] = dict(zip([i.lower() for i in namelist], namelist))
-                            logging.info(f"    压缩包中有{len(namelist)}个文件；")
+                        namelist = zip_file.namelist()
+                        self.manifest[fullname] = dict(zip([i.lower() for i in namelist], namelist))
+                        logging.info(f"    压缩包中有{len(namelist)}个文件；")
 
-                        except BadZipFile:
-                            logging.info(f"  {folder}中的{f}并不是有效的压缩文件")
+                    except BadZipFile:
+                        logging.info(f"  {folder}中的{f}并不是有效的压缩文件")
 
-            elif folder == "data":
-                raise ValueError(f"\"{self.h5_path}\"中没有找到\"{folder}\"")
 
         self.zip_q = tuple(i[0] for i in sorted(temp, key=lambda x: x[1], reverse=True))
 
@@ -65,20 +87,39 @@ class RawData:
 
         return None
 
+    def get_progress(self):
+        with self.lock:
+          return self.curr_prog / self.total_prog
+
+    def get_stage(self):
+        with self.lock:
+            return self.curr_stage
+
+    @staticmethod
+    def get_time_weightage():
+        return 3.0
+
 
 class GameInfo:
     HEROCLASS_XDB = "GameMechanics/RefTables/HeroClass.xdb"
     SKILLS_XDB = "GameMechanics/RefTables/Skills.xdb"
 
-    def __init__(self, data):
+    def __init__(self):
         self.skill_prob = None
         self.class_info = None
         self.skill_info = None
         self.perk_info = None
+        self.curr_stage = None
+        self.curr_prog = 0
+        self.total_prog = 322
+        self.lock = Lock()
 
+    def run(self, data):
         prev_timeit = time()
 
         logging.info("\n解析Skills.xdb中的信息……")
+        with self.lock:
+            self.curr_stage = "解析Skills.xdb中的信息"
         self.skills_xdb = data.get_file(self.SKILLS_XDB)
         if self.skills_xdb is None:
             raise ValueError("没有找到Skills.xdb，游戏数据损失！")
@@ -88,12 +129,14 @@ class GameInfo:
                         f"用时{time() - prev_timeit:.2f}秒。")
 
         logging.info("\n解析HeroClass.xdb中的信息……")
+        with self.lock:
+            self.curr_stage = "解析HeroClass.xdb中的信息"
         self.heroclass_xdb = data.get_file(self.HEROCLASS_XDB)
         if self.heroclass_xdb is None:
             raise ValueError("没有找到HeroClass.xdb，游戏数据损失！")
         self._parse_heroclass_xdb(data)
         logging.warning(f"HeroClass.xdb解析完毕，发现{len(self.class_info)}个职业，"
-                        f"一共{sum([len(i) for i in self.class_info.values()])}种主技能技能概率，"
+                        f"一共{sum([len(i) for i in self.skill_prob.values()])}种主技能技能概率，"
                         f"用时{time() - prev_timeit:.2f}秒。")
         prev_timeit = time()
 
@@ -142,6 +185,8 @@ class GameInfo:
                     if prob > 0:
                         self.skill_prob[class_id][skill_id] = prob
                         logging.info(f"    目前职业技能{skill_id}的概率是{prob}")
+                        with self.lock:
+                            self.curr_prog += 1
 
     def _parse_skills_xdb(self, data):
         root = ET.fromstring(self.skills_xdb)
@@ -162,6 +207,8 @@ class GameInfo:
                     descs = _f("DescriptionFileRef", GameInfo._parse_txt)
                     self.skill_info[sp_id] = SkillInfo(names, descs, icons)
                     logging.info(f"  找到主技能{sp_id}{str(names)}")
+                    with self.lock:
+                        self.curr_prog += 1
 
                 else:
                     perk_skill = ele.find("BasicSkillID").text
@@ -193,6 +240,8 @@ class GameInfo:
 
                     self.perk_info[perk_skill][sp_id] = PerkInfo(name, desc, typ, icon, grey, preq)
                     logging.info(f"  找到子技能{sp_id}({name})")
+                    with self.lock:
+                        self.curr_prog += 1
 
 
     def _parse_ui_xdb(self):
@@ -200,3 +249,15 @@ class GameInfo:
 
     def _parse_hero_xdb(self):
         pass
+
+    @staticmethod
+    def get_time_weightage():
+        return 2.6
+
+    def get_progress(self):
+        with self.lock:
+            return self.curr_prog / self.total_prog
+
+    def get_stage(self):
+        with self.lock:
+            return self.curr_stage

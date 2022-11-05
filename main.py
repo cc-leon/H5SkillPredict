@@ -1,6 +1,6 @@
 import logging
 
-from mainwnd import MainWnd
+from gui import MainWnd
 
 
 def main():
@@ -12,9 +12,14 @@ def main():
 
 
 def test():
-    from zipfile import ZipFile, Path
-    aa = ZipFile("D:\\games\\TOE31\\data\\data.pak")
+    from threading import Lock
+    aa = Lock()
 
+    with aa:
+        print("aa")
+
+    with aa:
+        print("bb")
 
 if __name__ == "__main__":
     main()
