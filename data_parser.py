@@ -56,6 +56,7 @@ class RawData:
 
         for folder in RawData.DIRS:
             fullpath = os.path.join(self.h5_path, folder)
+            if not os.path.isdir(fullpath): continue
             with self.lock:
                 self.curr_stage = f"正在扫描{folder}文件夹"
 
@@ -103,6 +104,8 @@ class RawData:
 class GameInfo:
     HEROCLASS_XDB = "GameMechanics/RefTables/HeroClass.xdb"
     SKILLS_XDB = "GameMechanics/RefTables/Skills.xdb"
+    HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreenShared).xdb"
+    ANY_XDB = "MapObjects/_(AdvMapSharedGroup)/Heroes/Any.xdb"
 
     def __init__(self):
         self.skill_prob = None
@@ -113,32 +116,37 @@ class GameInfo:
         self.curr_prog = 0
         self.total_prog = 322
         self.lock = Lock()
+        self.xdbs = {"skills": None, "heroclass": None, "heroscreen3": None, "any": None}
 
     def run(self, data):
-        prev_timeit = time()
+        RunInfo = namedtuple("RunInfo", ("xdb_path", "dict_key",  "sub_func", "done_msg", "done_args"))
+        run_info = (
+            RunInfo(GameInfo.SKILLS_XDB, "skills", self._parse_skills_xdb, 
+                    "解析完毕，加载了{}个主技能，{}个子技能",
+                    (lambda : len(self.skill_info), lambda : sum([len(i) for i in self.perk_info.values()]))),
+            RunInfo(GameInfo.HEROCLASS_XDB, "heroclass", self._parse_heroclass_xdb,
+                    "解析完毕，发现{}个职业，一共{}种主技能技能概率",
+                    (lambda : len(self.class_info), lambda: sum([len(i) for i in self.skill_prob.values()]))),
+            RunInfo(GameInfo.HEROSCREEN3_XDB, "heroscreen3", self._parse_ui_xdb,
+                    "解析完毕，加载了{}个UI部件",
+                    (lambda : 0, )),
+            RunInfo(GameInfo.ANY_XDB, "any", self._parse_hero_xdb,
+                    "解析完毕，加载了{}个英雄",
+                    (lambda : 0, ))
+        )
 
-        logging.info("\n解析Skills.xdb中的信息……")
-        with self.lock:
-            self.curr_stage = "解析Skills.xdb中的信息"
-        self.skills_xdb = data.get_file(self.SKILLS_XDB)
-        if self.skills_xdb is None:
-            raise ValueError("没有找到Skills.xdb，游戏数据损失！")
-        self._parse_skills_xdb(data)
-        logging.warning(f"Skills.xdb解析完毕，加载了{len(self.skill_info)}个主技能，"
-                        f"{sum([len(i) for i in self.perk_info.values()])}个子技能，"
-                        f"用时{time() - prev_timeit:.2f}秒。")
-
-        logging.info("\n解析HeroClass.xdb中的信息……")
-        with self.lock:
-            self.curr_stage = "解析HeroClass.xdb中的信息"
-        self.heroclass_xdb = data.get_file(self.HEROCLASS_XDB)
-        if self.heroclass_xdb is None:
-            raise ValueError("没有找到HeroClass.xdb，游戏数据损失！")
-        self._parse_heroclass_xdb(data)
-        logging.warning(f"HeroClass.xdb解析完毕，发现{len(self.class_info)}个职业，"
-                        f"一共{sum([len(i) for i in self.skill_prob.values()])}种主技能技能概率，"
-                        f"用时{time() - prev_timeit:.2f}秒。")
-        prev_timeit = time()
+        for info in run_info:
+            prev_timeit = time()
+            file_name = os.path.basename(info.xdb_path)
+            logging.info(f"\n解析{file_name}中的信息……")
+            with self.lock:
+                self.curr_stage = f"解析{file_name}中的信息"
+            self.xdbs[info.dict_key] = data.get_file(info.xdb_path)
+            if self.xdbs[info.dict_key] is None:
+                raise ValueError(f"没有找到{file_name}，游戏数据损失！")
+            info.sub_func(data)
+            done_msg = info.done_msg.format(*(i() for i in info.done_args))
+            logging.warning(file_name + done_msg + f"，用时{time() - prev_timeit:.2f}秒。")
 
     @staticmethod
     def _proc_xdb_path(href, xdb=None):
@@ -165,7 +173,7 @@ class GameInfo:
         return result
 
     def _parse_heroclass_xdb(self, data):
-        root = ET.fromstring(self.heroclass_xdb)
+        root = ET.fromstring(self.xdbs["heroclass"])
         self.skill_prob = {}
         self.class_info = {}
 
@@ -189,7 +197,7 @@ class GameInfo:
                             self.curr_prog += 1
 
     def _parse_skills_xdb(self, data):
-        root = ET.fromstring(self.skills_xdb)
+        root = ET.fromstring(self.xdbs["skills"])
         self.skill_info = {}
         self.perk_info = {}
 
@@ -244,10 +252,10 @@ class GameInfo:
                         self.curr_prog += 1
 
 
-    def _parse_ui_xdb(self):
+    def _parse_ui_xdb(self, data):
         pass
 
-    def _parse_hero_xdb(self):
+    def _parse_hero_xdb(self, data):
         pass
 
     @staticmethod

@@ -1,4 +1,6 @@
 import logging
+import time
+import sys
 from threading import Thread, Lock
 from tkinter import W, E, END
 from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext
@@ -69,13 +71,13 @@ class MainWnd(Tk):
         self.title(TITLE)
         self.resizable(False, False)
 
-        #self.interactive_frame = InteractiveFrame(self)
-        #self.interactive_frame.(column=0, row=0, sticky="w", padx=10, pady=10)
+        self.interactive_frame = InteractiveFrame(self)
+        self.interactive_frame.grid(column=0, row=0, sticky="w", padx=10, pady=10)
 
         self.log_frame = LogFrame(self)
         self.log_frame.grid(column=0, row=1, columnspan=2)
 
-        self.status_text = Label(self, text="已启动", border=1, relief="sunken", padding=2, font=("", 10))
+        self.status_text = Label(self, text="已启动", border=1, relief="sunken", padding=2, font=("TkFixedFont", 10))
         self.status_text.grid(column=0, row=2, sticky=W+E)
         self.status_prog = Progressbar(self)
 
@@ -119,7 +121,8 @@ class MainWnd(Tk):
         h5_path = "D:\\games\\TOE31\\"
         if h5_path == "":
             messagebox.showerror(TITLE, "本程序依赖已安装的英雄无敌5游戏数据！\n无游戏数据，退出。")
-            self.destroy()
+            return self.on_close()
+
         self.per.last_path = h5_path
 
         self.game_info = None
@@ -132,12 +135,21 @@ class MainWnd(Tk):
         self.after(10, self._ask_game_data_after, raw_data, game_info)
 
     def _ask_game_data_thread(self, raw_data, game_info):
-        raw_data.run()
+        time.sleep(0.1)
+
+        try:
+            raw_data.run()
+        except ValueError as e:
+            with self.lock:
+                self.game_info = e
+            return
+
         try:
             game_info.run(raw_data)
         except ValueError as e:
             with self.lock:
                 self.game_info = e
+            return
 
         with self.lock:
             self.game_info = game_info
@@ -145,6 +157,7 @@ class MainWnd(Tk):
     def _ask_game_data_after(self, raw_data, game_info):
         with self.lock:
             if type(self.game_info) is ValueError:
+                self.withdraw()
                 messagebox.showerror(TITLE, str(self.game_info) + "，\n请检查是否是正确的英雄无敌5安装文件夹")
                 self._asking_game_data()
             elif type(self.game_info) is GameInfo:
@@ -163,6 +176,9 @@ class MainWnd(Tk):
                     prog_value = game_info.get_progress() * 100 * GameInfo.get_time_weightage() / total_weight \
                         + RawData.get_time_weightage() * 100 / total_weight
 
-                self.status_text.config(text=f"{status_text}, 总进度{prog_value:.2f}%")
+                prog_value = 100.00 if prog_value > 100.00 else prog_value
+                status_text += f"{status_text}, 总进度{prog_value:.2f}%"
+                status_text += (50 - len(status_text)) * " "
+                self.status_text.config(text=status_text)
                 self.status_prog.config(value=prog_value)
                 self.after(10, self._ask_game_data_after, raw_data, game_info)

@@ -1,4 +1,5 @@
 import logging
+from zipfile import ZipFile
 
 from gui import MainWnd
 
@@ -12,8 +13,7 @@ def main():
 
 
 def test():
-    pass
-
+    ZipFile
 
 if __name__ == "__main__":
     main()
