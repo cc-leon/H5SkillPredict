@@ -8,7 +8,7 @@ from zipfile import BadZipFile, ZipFile
 from io import BytesIO
 from threading import Lock
 1
-from PIL import Image
+from PIL import Image, ImageChops
 
 
 SkillInfo = namedtuple("SkillInfo", ["names", "descs", "icons"])
@@ -104,7 +104,7 @@ class RawData:
 class GameInfo:
     HEROCLASS_XDB = "GameMechanics/RefTables/HeroClass.xdb"
     SKILLS_XDB = "GameMechanics/RefTables/Skills.xdb"
-    HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreenShared).xdb"
+    HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreen).xdb"
     ANY_XDB = "MapObjects/_(AdvMapSharedGroup)/Heroes/Any.xdb"
 
     def __init__(self):
@@ -113,6 +113,7 @@ class GameInfo:
         self.skill_info = None
         self.perk_info = None
         self.curr_stage = None
+        self.ui = None
         self.curr_prog = 0
         self.total_prog = 322
         self.lock = Lock()
@@ -171,6 +172,10 @@ class GameInfo:
     def _parse_txt(href, xdb, data):
         result = data.get_file(GameInfo._proc_xdb_path(href, xdb)).decode("utf-16")
         return result
+
+    @staticmethod
+    def _parse_xdb(href, xdb, data):
+        return data.get_file(GameInfo._proc_xdb_path(href, xdb).split("#")[0])
 
     def _parse_heroclass_xdb(self, data):
         root = ET.fromstring(self.xdbs["heroclass"])
@@ -251,12 +256,81 @@ class GameInfo:
                     with self.lock:
                         self.curr_prog += 1
 
-
     def _parse_ui_xdb(self, data):
-        pass
+        self.ui = {}
+
+        ele = ET.fromstring(self.xdbs["heroscreen3"]).find("Shared")
+        xdb_path = GameInfo._proc_xdb_path(ele.get("href").split("#")[0], self.HEROSCREEN3_XDB)
+        xdb_file = GameInfo._parse_xdb(ele.get("href"), self.HEROSCREEN3_XDB, data)
+        ele = ET.fromstring(xdb_file).find("Children")
+
+        # Get Background dds
+        # Load HeroMeetFull.(WindowSimple).xdb into memory
+        heromeet_xdb_path = GameInfo._proc_xdb_path(ele[5].get("href").split("#")[0], xdb_path)
+        logging.info(f"  解析UI文件{heromeet_xdb_path}")
+        heromeet_xdb_file = GameInfo._parse_xdb(ele[5].get("href"), xdb_path, data)
+        # Load HeroMeetFull.(WindowSimpleShared).xdb into memory
+        heromeet_ele = ET.fromstring(heromeet_xdb_file).find("Shared")
+        heromeet_xdb_file = GameInfo._parse_xdb(heromeet_ele.get("href"), heromeet_xdb_path, data)
+        heromeet_xdb_path = GameInfo._proc_xdb_path(heromeet_ele.get("href").split("#")[0], heromeet_xdb_path)
+        logging.info(f"  解析UI文件{heromeet_xdb_path}")
+        # Load HeroMeet.(WindowSimple).xdb into memory
+        heromeet_ele = ET.fromstring(heromeet_xdb_file).find("Children")[0]
+        heromeet_xdb_file = GameInfo._parse_xdb(heromeet_ele.get("href"), heromeet_xdb_path, data)
+        heromeet_xdb_path = GameInfo._proc_xdb_path(heromeet_ele.get("href").split("#")[0], heromeet_xdb_path)
+        logging.info(f"  解析UI文件{heromeet_xdb_path}")
+        # Load HeroMeet.(WindowSimpleShared).xdb into memory
+        heromeet_ele = ET.fromstring(heromeet_xdb_file).find("Shared")
+        heromeet_xdb_file = GameInfo._parse_xdb(heromeet_ele.get("href"), heromeet_xdb_path, data)
+        heromeet_xdb_path = GameInfo._proc_xdb_path(heromeet_ele.get("href").split("#")[0], heromeet_xdb_path)
+        logging.info(f"  解析UI文件{heromeet_xdb_path}")
+
+        # Load skills and abilities xdb for dds
+        heromeet_ele = ET.fromstring(heromeet_xdb_file).find("Children")
+        heromeet_skills = heromeet_ele[2].get("href")
+        heromeet_abilities = heromeet_ele[3].get("href")
+
+        def _get_skill_or_ability(href):
+            # Load Skills/Abilities.(WindowSimple).xdb into memory
+            heromeet_this_xdb_file = GameInfo._parse_xdb(href, heromeet_xdb_path, data)
+            heromeet_this_xdb_path = GameInfo._proc_xdb_path(href.split("#")[0], heromeet_xdb_path)
+            logging.info(f"  解析UI文件{heromeet_this_xdb_path}")
+            # Load Skills/Abilities.(WindowSimpleShared).xdb into memory
+            heromeet_ele = ET.fromstring(heromeet_this_xdb_file).find("Shared")
+            heromeet_this_xdb_file = GameInfo._parse_xdb(heromeet_ele.get("href"), heromeet_this_xdb_path, data)
+            heromeet_this_xdb_path = GameInfo._proc_xdb_path(heromeet_ele.get("href").split("#")[0],
+                                                            heromeet_this_xdb_path)
+            logging.info(f"  解析UI文件{heromeet_this_xdb_path}")
+            # Load Skills/Abilities.(BackgroundSimpleTexture).xdb into memory
+            heromeet_ele = ET.fromstring(heromeet_this_xdb_file).find("Background")
+            heromeet_this_xdb_file = GameInfo._parse_xdb(heromeet_ele.get("href"), heromeet_this_xdb_path, data)
+            heromeet_this_xdb_path = GameInfo._proc_xdb_path(heromeet_ele.get("href").split("#")[0],
+                                                            heromeet_this_xdb_path)
+            logging.info(f"  解析UI文件{heromeet_this_xdb_path}")
+            # Load Skills/Abilities.xdb into memory
+            dds_href = ET.fromstring(heromeet_this_xdb_file).find("Texture").get("href")
+            result = GameInfo._parse_dds(dds_href, heromeet_this_xdb_path, data)
+            logging.info(f"  解析UI文件{heromeet_this_xdb_path}")
+
+            bg = Image.new(result.mode, result.size, result.getpixel((0, 0)))
+            diff = ImageChops.difference(result, bg)
+            diff = ImageChops.add(diff, diff, 2.0, -100)
+            rect = diff.getbbox()
+            return result.crop(rect), rect
+
+        img, rect = _get_skill_or_ability(heromeet_skills)
+        rect = (rect[0], int((rect[3] - rect[1]) * .681), rect[2], rect[3])
+        self.ui["skills"] = (img.crop(rect), rect)
+        img, rect = _get_skill_or_ability(heromeet_abilities)
+        rect = (rect[0], rect[1], rect[2], int((rect[3] - rect[1]) * .94))
+        self.ui["abilities"] = (img.crop(rect), rect)
+
+        # Load ICO bg and positions
+        meethero_xdb = ele[3].get("href")
+
 
     def _parse_hero_xdb(self, data):
-        pass
+        import time
 
     @staticmethod
     def get_time_weightage():

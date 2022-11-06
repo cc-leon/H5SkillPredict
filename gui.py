@@ -2,9 +2,11 @@ import logging
 import time
 import sys
 from threading import Thread, Lock
-from tkinter import W, E, END
-from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext
+from tkinter import W, E, N, S, END
+from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Text
 from tkinter.ttk import Frame, Label, Button, Progressbar
+
+from PIL import ImageTk
 
 from data_parser import RawData, GameInfo
 from persistence import Persistence
@@ -14,25 +16,24 @@ TITLE = "英雄无敌5技能概率计算器"
 
 
 class InteractiveFrame(Frame):
-    def __init__(self, container):
-        super(InteractiveFrame, self).__init__(container)
+    def __init__(self, parent):
+        super(InteractiveFrame, self).__init__(parent)
+        self.abilities = Label(self)
+        self.abilities.grid(column=0, row=0)
+        self.skills = Label(self)
+        self.skills.grid(column=0, row=1)
 
-        self.label = Label(self, text="Hello, cats!")
-        self.label.grid(column=0, row=0)
-
-        self.button = Button(self, text="Meow")
-        self.button["command"] = self.button_clicked
-        self.button.grid(column=0, row=1)
-
-    def button_clicked(self):
-        logging.info("Cats says:")
-        logging.info("Meow meow meow!")
+    def load_bg(self, abilities_img, skills_img):
+        self.abilities_img = ImageTk.PhotoImage(abilities_img)
+        self.abilities.config(image=self.abilities_img)
+        self.skills_img = ImageTk.PhotoImage(skills_img)
+        self.skills.config(image=self.skills_img)
 
 
-class LogFrame(Frame):
+class LogWnd(Toplevel):
     class _TextHandler(logging.Handler):
         def __init__(self, text):
-            super(LogFrame._TextHandler, self).__init__()
+            super(LogWnd._TextHandler, self).__init__()
             self.text = text
 
         def emit(self, record):
@@ -45,17 +46,15 @@ class LogFrame(Frame):
             self.text.after(0, append)
 
     def __init__(self, parent):
-        super(LogFrame, self).__init__(parent)
-        self.root = parent
-        self.build_gui()
+        super(LogWnd, self).__init__(parent)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.title("日志记录")
 
-    def build_gui(self):                    
-        self.log_box = scrolledtext.ScrolledText(self, state='disabled', height=20, width=80)
+        self.log_box = scrolledtext.ScrolledText(self, state='disabled', height=40, width=100)
         self.log_box.configure(font='TkFixedFont')
-        self.log_box.grid(column=0, row=0)
-
-        text_handler = LogFrame._TextHandler(self.log_box)
-
+        self.log_box.grid(column=0, row=0, sticky="NEWS")
+        text_handler = LogWnd._TextHandler(self.log_box)
         logger = logging.getLogger()
         logger.addHandler(text_handler)
 
@@ -67,15 +66,13 @@ class MainWnd(Tk):
         self.game_info = None
         self.lock = Lock()
 
+        self.log_wnd = LogWnd(self)
         self.withdraw()
         self.title(TITLE)
         self.resizable(False, False)
 
         self.interactive_frame = InteractiveFrame(self)
-        self.interactive_frame.grid(column=0, row=0, sticky="w", padx=10, pady=10)
-
-        self.log_frame = LogFrame(self)
-        self.log_frame.grid(column=0, row=1, columnspan=2)
+        self.interactive_frame.grid(column=0, row=0, sticky="w")
 
         self.status_text = Label(self, text="已启动", border=1, relief="sunken", padding=2, font=("TkFixedFont", 10))
         self.status_text.grid(column=0, row=2, sticky=W+E)
@@ -84,6 +81,7 @@ class MainWnd(Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._build_top_menu()
+        #self.geometry(f"{}x{}+{}+{}")
         self._asking_game_data()
 
     def on_close(self):
@@ -101,10 +99,10 @@ class MainWnd(Tk):
     def _on_menu_showlog(self, **kwargs):
         if self.per.show_log:
             new_text = "显示日志"
-            self.log_frame.grid_forget()
+            #self.log_box.grid_forget()
         else:
             new_text = "隐藏日志"
-            self.log_frame.grid(column=0, row=1)
+            #self.log_box.grid(column=0, row=1, sticky=W + E, columnspan=2)
 
         self.per.show_log = not self.per.show_log
         self.top_menu.entryconfig(1, label=new_text)
@@ -113,6 +111,8 @@ class MainWnd(Tk):
         self.status_prog.grid_forget()
         self.status_text.grid(column=0, row=2, sticky=W+E, columnspan=2)
         self.status_text.config(text="游戏数据加载完毕")
+
+        self.interactive_frame.load_bg(self.game_info.ui["abilities"][0], self.game_info.ui["skills"][0])
 
     def _asking_game_data(self):
         self.withdraw()
@@ -177,8 +177,8 @@ class MainWnd(Tk):
                         + RawData.get_time_weightage() * 100 / total_weight
 
                 prog_value = 100.00 if prog_value > 100.00 else prog_value
-                status_text += f"{status_text}, 总进度{prog_value:.2f}%"
-                status_text += (50 - len(status_text)) * " "
+                status_text = f"{status_text}, 总进度{prog_value:.2f}%"
+                status_text += (65 - len(status_text)) * " "
                 self.status_text.config(text=status_text)
                 self.status_prog.config(value=prog_value)
                 self.after(10, self._ask_game_data_after, raw_data, game_info)
