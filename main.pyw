@@ -11,16 +11,11 @@ def main():
     main_window = MainWnd()
     main_window.mainloop()
 
+from dataclasses import dataclass
 
 def test():
-    try:
-        raise ValueError("ABC")
-    except ValueError as e:
-        print("Excepted " + str(e))
-    else:
-        print("No exception")
-    finally:
-        print("In conclusion")
+    pass
+
 
 if __name__ == "__main__":
     main()

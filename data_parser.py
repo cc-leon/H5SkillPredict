@@ -11,8 +11,8 @@ from threading import Lock
 from PIL import Image, ImageChops
 
 
-SkillInfo = namedtuple("SkillInfo", ["names", "descs", "icons"])
-PerkInfo = namedtuple("PerkInfo", ["name", "desc", "typ", "icon", "grey", "preq"])
+SkillInfo = namedtuple("SkillInfo", ("names", "descs", "icons", "racial"))
+PerkInfo = namedtuple("PerkInfo", ("name", "desc", "typ", "icon", "grey", "preq", "req"))
 
 
 class RawData:
@@ -107,17 +107,18 @@ class GameInfo:
     HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreen).xdb"
     ANY_XDB = "MapObjects/_(AdvMapSharedGroup)/Heroes/Any.xdb"
     UIInfo = namedtuple("UIInfo", ("bg", "ico"))
+    OffsetInfo = namedtuple("OffsetInfo", ("face", "name", "description", "line", "race", "ability", "skill"))
 
     def __init__(self):
-        self.skill_prob = None
         self.class_info = None
         self.skill_info = None
         self.perk_info = None
+        self.skill_prob = None
         self.curr_stage = None
         self.ui = None
         self.offsets = None
         self.curr_prog = 0
-        self.total_prog = 322
+        self.total_prog = 1567
         self.lock = Lock()
 
     def run(self, data):
@@ -160,8 +161,7 @@ class GameInfo:
             curr_loc = os.path.dirname(xdb)
             return curr_loc + "/" + href
 
-    @staticmethod
-    def _parse_dds(href, xdb, data):
+    def _parse_dds(self, href, xdb, data):
         # Given a href that poins to a for-dds XDB file, from which XDB file that href is located
         # Returns the Image representation of the dds
 
@@ -171,40 +171,51 @@ class GameInfo:
         if dds == "":
             return None
         dds = GameInfo._proc_xdb_path(dds, tex_xdb)
+        with self.lock:
+            self.curr_prog += 2
 
         return Image.open(BytesIO(data.get_file(dds)))
 
-    @staticmethod
-    def _parse_txt(href, xdb, data):
+    def _parse_txt(self, href, xdb, data):
         # Given a href that points to a txt file, and from which XDB file that href is located
         # Return that the string in UTF-16 containted in the txt file
-
+        with self.lock:
+            self.curr_prog += 1
         result = data.get_file(GameInfo._proc_xdb_path(href, xdb)).decode("utf-16")
         return result
 
-    @staticmethod
-    def _parse_xdb(href, xdb, data):
+    def _parse_xdb(self, href, xdb, data):
         # Given a href that points to a xdb file, and from which XDB file that href is located
         # Return the binary contents of that xdb file
+        with self.lock:
+            self.curr_prog += 1
         return data.get_file(GameInfo._proc_xdb_path(href, xdb).split("#")[0])
 
-    @staticmethod
-    def _parse_shared_from_simple(simple_href, xdb, data):
+    def _parse_shared_from_simple(self, simple_href, xdb, data, shared=True):
         # Given the href that points to a WindowSimple XDB, and from which XDB file that href is located
         # Return the ETree for both WindowSimple and its WindowSimpleShared, and WindowSimpleShared Path
 
-        simple_file = GameInfo._parse_xdb(simple_href, xdb, data)
+        simple_file = self._parse_xdb(simple_href, xdb, data)
         simple_path = GameInfo._proc_xdb_path(simple_href.split("#")[0], xdb)
         logging.info(f"  解析UI文件{simple_path}")
         simple_ele = ET.fromstring(simple_file)
-        shared_file = GameInfo._parse_xdb(simple_ele.find("Shared").get("href"), simple_path, data)
-        shared_path = GameInfo._proc_xdb_path(simple_ele.find("Shared").get("href").split("#")[0], simple_path)
-        logging.info(f"  解析UI文件{shared_path}")
-        shared_ele = ET.fromstring(shared_file)
-        return simple_ele, shared_ele, shared_path
+        offset_ele = simple_ele.find("Placement").find("Position").find("First")
+        offset = (int(offset_ele.find("x").text), int(offset_ele.find("y").text))
+
+        shared_ele = None
+        shared_path = None
+        if shared is True:
+            shared_file = self._parse_xdb(simple_ele.find("Shared").get("href"), simple_path, data)
+            shared_path = GameInfo._proc_xdb_path(simple_ele.find("Shared").get("href").split("#")[0], simple_path)
+            logging.info(f"  解析UI文件{shared_path}")
+            shared_ele = ET.fromstring(shared_file)
+
+        return offset, shared_ele, shared_path
 
     def _parse_heroclass_xdb(self, data):
         root = ET.fromstring(data.get_file(self.HEROCLASS_XDB))
+        with self.lock:
+            self.curr_prog += 1
         self.skill_prob = {}
         self.class_info = {}
 
@@ -214,7 +225,7 @@ class GameInfo:
                 self.skill_prob[class_id] = {}
                 ele = i.find("obj")
 
-                display_name = GameInfo._parse_txt(ele.find("NameFileRef").get("href"), self.HEROCLASS_XDB, data)
+                display_name = self._parse_txt(ele.find("NameFileRef").get("href"), self.HEROCLASS_XDB, data)
                 self.class_info[class_id] = display_name
                 logging.info(f"  发现职业信息{class_id}({display_name})")
 
@@ -224,11 +235,11 @@ class GameInfo:
                     if prob > 0:
                         self.skill_prob[class_id][skill_id] = prob
                         logging.info(f"    目前职业技能{skill_id}的概率是{prob}")
-                        with self.lock:
-                            self.curr_prog += 1
 
     def _parse_skills_xdb(self, data):
         root = ET.fromstring(data.get_file(self.SKILLS_XDB))
+        with self.lock:
+            self.curr_prog += 1
         self.skill_info = {}
         self.perk_info = {}
 
@@ -241,13 +252,11 @@ class GameInfo:
                     def _f(x, f): return tuple(f(j.get("href"), self.SKILLS_XDB, data)
                                                for j in ele.find(x) if "href" in j.attrib)
 
-                    icons = _f("Texture", GameInfo._parse_dds)
-                    names = _f("NameFileRef", GameInfo._parse_txt)
-                    descs = _f("DescriptionFileRef", GameInfo._parse_txt)
-                    self.skill_info[sp_id] = SkillInfo(names, descs, icons)
+                    icons = _f("Texture", self._parse_dds)
+                    names = _f("NameFileRef", self._parse_txt)
+                    descs = _f("DescriptionFileRef", self._parse_txt)
+                    self.skill_info[sp_id] = SkillInfo(names, descs, icons, False)
                     logging.info(f"  找到主技能{sp_id}{str(names)}")
-                    with self.lock:
-                        self.curr_prog += 1
 
                 else:
                     perk_skill = ele.find("BasicSkillID").text
@@ -256,12 +265,12 @@ class GameInfo:
 
                     def _f(x, f): return f(x.get("href"), self.SKILLS_XDB, data)
 
-                    name = _f(ele.find("NameFileRef")[0], GameInfo._parse_txt)
-                    desc = _f(ele.find("DescriptionFileRef")[0], GameInfo._parse_txt)
+                    name = _f(ele.find("NameFileRef")[0], self._parse_txt)
+                    desc = _f(ele.find("DescriptionFileRef")[0], self._parse_txt)
                     typ = ele.find("SkillType").text
-                    icon = _f(ele.find("Texture")[1], GameInfo._parse_dds)
+                    icon = _f(ele.find("Texture")[1], self._parse_dds)
                     if ele.find("Texture")[0].get("href"):
-                        grey = _f(ele.find("Texture")[0], GameInfo._parse_dds)
+                        grey = _f(ele.find("Texture")[0], self._parse_dds)
                         if grey is None:
                             grey = icon
                     else:
@@ -277,24 +286,30 @@ class GameInfo:
                     else:
                         preq = None
 
-                    self.perk_info[perk_skill][sp_id] = PerkInfo(name, desc, typ, icon, grey, preq)
+                    self.perk_info[sp_id] = PerkInfo(name, desc, typ, icon, grey, preq, {})
                     logging.info(f"  找到子技能{sp_id}({name})")
-                    with self.lock:
-                        self.curr_prog += 1
+
+        # Fill up maps
+
+        for k, v in self.perk_info.items():
+            pass
 
     def _parse_ui_xdb(self, data):
         self.ui = {}
         self.offsets = {}
+        offsets = {}
+        sizes = {}
+        ui = {}
 
-        _, ele, xdb_path = GameInfo._parse_shared_from_simple("/" + GameInfo.HEROSCREEN3_XDB, None, data)
+        _, ele, xdb_path = self._parse_shared_from_simple("/" + GameInfo.HEROSCREEN3_XDB, None, data)
         ele = ele.find("Children")
 
         # Get Background dds
         # Load HeroMeetFull related into memory
-        _, heromeet_ele, heromeet_xdb_path = GameInfo._parse_shared_from_simple(ele[5].get("href"), xdb_path, data)
+        _, heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(ele[5].get("href"), xdb_path, data)
         heromeet_ele = heromeet_ele.find("Children")[0]
         # Load HeroMeet related into memory
-        _, heromeet_ele, heromeet_xdb_path = GameInfo._parse_shared_from_simple(heromeet_ele.get("href"),
+        _, heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(heromeet_ele.get("href"),
                                                                                 heromeet_xdb_path, data)
         heromeet_ele = heromeet_ele.find("Children")
 
@@ -304,15 +319,15 @@ class GameInfo:
 
         def _get_heromeet_skill_or_ability(href):
             # Load Skills/Abilities related into memory
-            _, this_ele, this_xdb_path = GameInfo._parse_shared_from_simple(href, heromeet_xdb_path, data)
+            _, this_ele, this_xdb_path = self._parse_shared_from_simple(href, heromeet_xdb_path, data)
             # Load Skills/Abilities.(BackgroundSimpleTexture).xdb into memory
             this_ele = this_ele.find("Background")
-            this_xdb_file = GameInfo._parse_xdb(this_ele.get("href"), this_xdb_path, data)
+            this_xdb_file = self._parse_xdb(this_ele.get("href"), this_xdb_path, data)
             this_xdb_path = GameInfo._proc_xdb_path(this_ele.get("href").split("#")[0], this_xdb_path)
             logging.info(f"  解析UI文件{this_xdb_path}")
             # Load Skills/Abilities.xdb into memory
             dds_href = ET.fromstring(this_xdb_file).find("Texture").get("href")
-            result = GameInfo._parse_dds(dds_href, this_xdb_path, data)
+            result = self._parse_dds(dds_href, this_xdb_path, data)
             logging.info(f"  解析UI文件{this_xdb_path}")
 
             bg = Image.new(result.mode, result.size, result.getpixel((0, 0)))
@@ -321,57 +336,113 @@ class GameInfo:
             rect = diff.getbbox()
             return result.crop(rect), rect
 
-        logging.info("  合兵Skills和Abilities的DDS文件")
         img1, rect1 = _get_heromeet_skill_or_ability(heromeet_skills)
+        img2, rect2 = _get_heromeet_skill_or_ability(heromeet_abilities)
+        logging.info("  裁剪并合并Skills和Abilities的dds文件")
         rect1 = (rect1[0], int((rect1[3] - rect1[1]) * .681), rect1[2], rect1[3])
         img1 = img1.crop(rect1)
-        img2, rect2 = _get_heromeet_skill_or_ability(heromeet_abilities)
         rect2 = (rect2[0], rect2[1], rect2[2], int((rect2[3] - rect2[1]) * .94))
         img2 = img2.crop(rect2)
 
         cated = Image.new('RGBA', (img1.width, img1.height + img2.height))
         cated.paste(img2, (0, 0))
         cated.paste(img1, (0, img2.height))
-        self.ui["bg"] = cated
-        self.offsets["abilities"] = (rect2[0], rect2[1])
-        self.offsets["skills"] = (rect1[0], rect1[1])
-
-        def _load_meet_or_self_hero(href):
-            this_ele, hero_ele, this_xdb_path = GameInfo._parse_shared_from_simple(href, xdb_path, data)
-            this_ele = this_ele.find("Placement").find("Position").find("First")
-            offset = (int(this_ele.find("x").text), int(this_ele.find("y").text))
-            return offset, hero_ele, this_xdb_path
+        ui["bg"] = cated
+        offsets["abilities"] = (rect2[0], rect2[1])
+        offsets["skills"] = (rect1[0], rect1[1])  # TODO
 
         # Load SelfHero
-        self.offsets["self"], hero_ele, hero_xdb_path = _load_meet_or_self_hero(ele[2].get("href"))
+        offsets["self"], hero_ele, hero_xdb_path = \
+            self._parse_shared_from_simple(ele[2].get("href"), xdb_path, data)
         # Load MeetHero
-        self.offsets["meet"], _, _ = _load_meet_or_self_hero(ele[3].get("href"))
+        offsets["meet"], _, _ = \
+            self._parse_shared_from_simple(ele[3].get("href"), xdb_path, data)
 
         hero_ele = hero_ele.find("Children")
+        heroinfo_ele = hero_ele[0]
+        heroabilities_ele = hero_ele[4]
+        heroskills_ele = hero_ele[3]
+        heroxxx_xdb_path = hero_xdb_path
 
-        def _load_sub_hero_file(this_sub_ele):
-            # Load HeroX.(WindowSimple).xdb into memory
-            this_sub_xdb_file = GameInfo._parse_xdb(this_sub_ele.get("href"), hero_xdb_path, data)
-            this_sub_xdb_path = GameInfo._proc_xdb_path(this_sub_ele.get("href").split("#")[0],
-                                                        hero_xdb_path)
-            logging.info(f"  解析UI文件{this_sub_xdb_path}")
-            # Load HeroX.(WindowSimpleShared).xdb into memory
-            this_sub_ele = ET.fromstring(this_sub_xdb_file).find("Shared")
-            this_sub_xdb_file = GameInfo._parse_xdb(this_sub_ele.get("href"), this_sub_xdb_path, data)
-            this_sub_xdb_path = GameInfo._proc_xdb_path(this_sub_ele.get("href").split("#")[0],
-                                                    this_sub_xdb_path)
-            this_sub_ele = ET.fromstring(this_sub_xdb_file)
-            return this_sub_xdb_file, this_sub_xdb_path
+        # Load HeroInfo related offsets into memory
+        offsets["heroinfo"], hero_ele, hero_xdb_path = \
+            self._parse_shared_from_simple(heroinfo_ele.get("href"), heroxxx_xdb_path, data)
+        hero_ele = hero_ele.find("Children")
+        offsets["heroface"], hero_sub_ele, _ = \
+            self._parse_shared_from_simple(hero_ele[0].get("href"), hero_xdb_path, data)
+        hero_sub_ele = hero_sub_ele.find("Placement").find("Size").find("First")
+        sizes["heroface"] = (int(hero_sub_ele.find("x").text), int(hero_sub_ele.find("y").text))
+        offsets["heroname"], hero_sub_ele, _ = \
+            self._parse_shared_from_simple(hero_ele[1].get("href"), hero_xdb_path, data)
+        offsets["herodescription"], hero_sub_ele, _ = \
+            self._parse_shared_from_simple(hero_ele[2].get("href"), hero_xdb_path, data)
 
-        # Load HeroInfo.(WindowSimpleShared).xdb into memory
-        this_sub_xdb_file, this_sub_xdb_path = _load_sub_hero_file(hero_ele[0])
-        # Load HeroSkills.(WindowSimpleShared).xdb into memory
-        this_sub_xdb_file, this_sub_xdb_path = _load_sub_hero_file(hero_ele[3])
-        # Load HeroAbilities2.(WindowSimpleShared).xdb into memory
-        this_sub_xdb_file, this_sub_xdb_path = _load_sub_hero_file(hero_ele[4])
+        # Load HeroAbilities related offsets into memory
+        offsets["heroabilities"], hero_ele, hero_xdb_path = \
+            self._parse_shared_from_simple(heroabilities_ele.get("href"), heroxxx_xdb_path, data)
+        hero_ele = hero_ele.find("Children")
+        offsets["heroabilitiesheader"], _, _ = \
+            self._parse_shared_from_simple(hero_ele[0].get("href"), hero_xdb_path, data, False)
+        offsets["heroskillsheader"], _, _ = \
+            self._parse_shared_from_simple(hero_ele[6].get("href"), hero_xdb_path, data, False)
+        for i in range(5):
+            offsets["heroline" + str(i)], hero_sub_ele, hero_sub_xdb_path = \
+                self._parse_shared_from_simple(hero_ele[i + 1].get("href"), hero_xdb_path, data)
+        hero_sub_ele = hero_sub_ele.find("Children")
+        for i, j in zip(hero_sub_ele, range(4)):
+            offsets["heroslot" + str(j)], hero_sub_ele, hero_sub_xdb_path = \
+                self._parse_shared_from_simple(i.get("href"), hero_sub_xdb_path, data)
+        # Load icon bg texture
+        hero_sub_ele = hero_sub_ele.find("Background")
+        hero_sub_xdb_file = self._parse_xdb(hero_sub_ele.get("href"), hero_sub_xdb_path, data)
+        hero_sub_ele = ET.fromstring(hero_sub_xdb_file).find("Texture")
+        ui["icon"] = self._parse_dds(hero_sub_ele.get("href"), hero_sub_xdb_path, data)
+
+        # Load HeroSkills related into memory
+        offsets["heroskills"], hero_ele, hero_xdb_path = \
+            self._parse_shared_from_simple(heroskills_ele.get("href"), heroxxx_xdb_path, data)
+        hero_ele = hero_ele.find("Children")
+        for i in range(5):
+            offsets["heroracial" + str(i)], _, _ = \
+                self._parse_shared_from_simple(hero_ele[i + 8].get("href"), hero_xdb_path, data, False)
+
+        # Generate proper ui data
+        self.ui = GameInfo.UIInfo(ui["bg"], ui["icon"])
 
     def _parse_hero_xdb(self, data):
-        pass
+        root = ET.fromstring(data.get_file(GameInfo.ANY_XDB))
+        with self.lock:
+            self.curr_prog += 1
+        root = root.find("links")
+        self.heroes = []
+
+        def _read_hero(href):
+            hero_xdb_file = self._parse_xdb(href, GameInfo.ANY_XDB, data)
+            hero_xdb_path = GameInfo._proc_xdb_path(href.split("#")[0], GameInfo.ANY_XDB)
+            hero_ele = ET.fromstring(hero_xdb_file)
+            hero_class = hero_ele.find("Class").text
+            hero_name = self._parse_txt(hero_ele.find("Editable").find("NameFileRef").get("href"),
+                                        hero_xdb_path, data)
+            hero_face = self._parse_dds(hero_ele.find("FaceTexture").get("href"), hero_xdb_path, data)
+
+            def _mastery2int(mastery):
+                if mastery == "MASTERY_BASIC": return 1
+                elif mastery == "MASTERY_ADVANCED": return 2
+                elif mastery == "MASTERY_EXPERT": return 3
+                else: return 0
+
+            race_skills = ((hero_ele.find("PrimarySkill").find("SkillID").text,
+                            _mastery2int(hero_ele.find("PrimarySkill").find("Mastery").text)), )
+            hero_skills = hero_ele.find("Editable").find("skills")
+            hero_skills = race_skills + tuple((i.find("SkillID").text, _mastery2int(i.find("Mastery").text))
+                                              for i in hero_skills)
+            hero_perks = hero_ele.find("Editable").find("perkIDs")
+            hero_perks = tuple(i.text for i in hero_perks)
+            logging.info(f"  读取{self.class_info[hero_class]}英雄“{hero_name}”")
+            return hero_class, hero_name, hero_skills, hero_perks
+
+        for i in root:
+            self.heroes.append(_read_hero(i.get("href")))
 
     @staticmethod
     def get_time_weightage():

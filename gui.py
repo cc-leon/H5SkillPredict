@@ -19,7 +19,7 @@ TITLE = "英雄无敌5技能概率计算器"
 class InteractiveFrame(Frame):
     def __init__(self, parent):
         super(InteractiveFrame, self).__init__(parent)
-        self.bg = Label(self)
+        self.bg = Label(self, border=0)
         self.bg.grid(column=0, row=0)
 
     def load_bg(self, bg_img):
@@ -131,7 +131,7 @@ class MainWnd(Tk):
         self.status_text.grid(column=0, row=2, sticky=W+E, columnspan=2)
         self.status_text.config(text="游戏数据加载完毕")
 
-        self.interactive_frame.load_bg(self.game_info.ui["bg"])
+        self.interactive_frame.load_bg(self.game_info.ui.bg)
 
     def _asking_game_data(self):
         self.withdraw()
