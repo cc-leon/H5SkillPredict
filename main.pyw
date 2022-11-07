@@ -13,7 +13,14 @@ def main():
 
 
 def test():
-    ZipFile
+    try:
+        raise ValueError("ABC")
+    except ValueError as e:
+        print("Excepted " + str(e))
+    else:
+        print("No exception")
+    finally:
+        print("In conclusion")
 
 if __name__ == "__main__":
     main()

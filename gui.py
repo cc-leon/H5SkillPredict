@@ -2,6 +2,7 @@ import logging
 import time
 import sys
 from threading import Thread, Lock
+from queue import Queue, Empty
 from tkinter import W, E, N, S, END
 from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Text
 from tkinter.ttk import Frame, Label, Button, Progressbar
@@ -18,45 +19,57 @@ TITLE = "英雄无敌5技能概率计算器"
 class InteractiveFrame(Frame):
     def __init__(self, parent):
         super(InteractiveFrame, self).__init__(parent)
-        self.abilities = Label(self)
-        self.abilities.grid(column=0, row=0)
-        self.skills = Label(self)
-        self.skills.grid(column=0, row=1)
+        self.bg = Label(self)
+        self.bg.grid(column=0, row=0)
 
-    def load_bg(self, abilities_img, skills_img):
-        self.abilities_img = ImageTk.PhotoImage(abilities_img)
-        self.abilities.config(image=self.abilities_img)
-        self.skills_img = ImageTk.PhotoImage(skills_img)
-        self.skills.config(image=self.skills_img)
+    def load_bg(self, bg_img):
+        self.bg_img = ImageTk.PhotoImage(bg_img)
+        self.bg.config(image=self.bg_img)
 
 
 class LogWnd(Toplevel):
     class _TextHandler(logging.Handler):
-        def __init__(self, text):
+        def __init__(self, queue):
             super(LogWnd._TextHandler, self).__init__()
-            self.text = text
+            self.queue = queue
 
         def emit(self, record):
-            msg = self.format(record)
-            def append():
-                self.text.configure(state="normal")
-                self.text.insert(END, msg + "\n")
-                self.text.configure(state="disabled")
-                self.text.yview(END)
-            self.text.after(0, append)
+            self.queue.put(self.format(record))
 
     def __init__(self, parent):
         super(LogWnd, self).__init__(parent)
+        self.queue = Queue()
+
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.title("日志记录")
 
-        self.log_box = scrolledtext.ScrolledText(self, state='disabled', height=40, width=100)
+        self.log_box = scrolledtext.ScrolledText(self, state='disabled', height=60, width=80)
         self.log_box.configure(font='TkFixedFont')
         self.log_box.grid(column=0, row=0, sticky="NEWS")
-        text_handler = LogWnd._TextHandler(self.log_box)
+        text_handler = LogWnd._TextHandler(self.queue)
         logger = logging.getLogger()
         logger.addHandler(text_handler)
+        self.after(0, self.append_msg)
+
+    def append_msg(self):
+        msgs = []
+
+        while(True):
+            try:
+                msg = self.queue.get_nowait()
+                msgs.append(msg)
+            except Empty:
+                break
+        
+        if len(msgs) > 0:
+            msgs.append("")
+            self.log_box.configure(state="normal")
+            self.log_box.insert(END, "\n".join(msgs))
+            self.log_box.configure(state="disabled")
+            self.log_box.yview(END)
+
+        self.after(100, self.append_msg)
 
 
 class MainWnd(Tk):
@@ -67,7 +80,8 @@ class MainWnd(Tk):
         self.lock = Lock()
 
         self.log_wnd = LogWnd(self)
-        self.withdraw()
+        self.log_wnd.update()
+        self.log_wnd.geometry("+{}+{}".format(self.per.log_x, self.per.log_y))
         self.title(TITLE)
         self.resizable(False, False)
 
@@ -81,10 +95,15 @@ class MainWnd(Tk):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._build_top_menu()
-        #self.geometry(f"{}x{}+{}+{}")
+        self.update()
+        self.geometry("+{}+{}".format(self.per.main_x, self.per.main_y))
         self._asking_game_data()
 
     def on_close(self):
+        self.per.main_x = self.winfo_x()
+        self.per.main_y = self.winfo_y()
+        self.per.log_x = self.log_wnd.winfo_x()
+        self.per.log_y = self.log_wnd.winfo_y()
         del self.per
         self.destroy()
 
@@ -112,7 +131,7 @@ class MainWnd(Tk):
         self.status_text.grid(column=0, row=2, sticky=W+E, columnspan=2)
         self.status_text.config(text="游戏数据加载完毕")
 
-        self.interactive_frame.load_bg(self.game_info.ui["abilities"][0], self.game_info.ui["skills"][0])
+        self.interactive_frame.load_bg(self.game_info.ui["bg"])
 
     def _asking_game_data(self):
         self.withdraw()
@@ -135,8 +154,6 @@ class MainWnd(Tk):
         self.after(10, self._ask_game_data_after, raw_data, game_info)
 
     def _ask_game_data_thread(self, raw_data, game_info):
-        time.sleep(0.1)
-
         try:
             raw_data.run()
         except ValueError as e:
