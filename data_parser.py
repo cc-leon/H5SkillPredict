@@ -3,7 +3,7 @@ import os
 from time import time
 import xml.etree.ElementTree as ET
 from collections import namedtuple
-import pprint
+from pprint import pprint
 from zipfile import BadZipFile, ZipFile
 from io import BytesIO
 from threading import Lock
@@ -295,8 +295,6 @@ class GameInfo:
             pass
 
     def _parse_ui_xdb(self, data):
-        self.ui = {}
-        self.offsets = {}
         offsets = {}
         sizes = {}
         ui = {}
@@ -306,12 +304,14 @@ class GameInfo:
 
         # Get Background dds
         # Load HeroMeetFull related into memory
-        _, heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(ele[5].get("href"), xdb_path, data)
+        offsets["bg"], heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(ele[5].get("href"), xdb_path, data)
         heromeet_ele = heromeet_ele.find("Children")[0]
+        offsets["bg"] = (-offsets["bg"][0], -offsets["bg"][1])
         # Load HeroMeet related into memory
-        _, heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(heromeet_ele.get("href"),
+        offset, heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(heromeet_ele.get("href"),
                                                                                 heromeet_xdb_path, data)
         heromeet_ele = heromeet_ele.find("Children")
+        offsets["bg"] = (offsets["bg"][0] - offset[0], offsets["bg"][1] - offset[1])
 
         # Load skills and abilities xdb for dds
         heromeet_skills = heromeet_ele[2].get("href")
@@ -338,22 +338,27 @@ class GameInfo:
 
         img1, rect1 = _get_heromeet_skill_or_ability(heromeet_skills)
         img2, rect2 = _get_heromeet_skill_or_ability(heromeet_abilities)
+
+        offsets["skills_crop1"] = (-rect1[0], -rect1[1])
+        offsets["abilities_crop1"] = (-rect2[0], -rect2[1])
         logging.info("  裁剪并合并Skills和Abilities的dds文件")
-        rect1 = (rect1[0], int((rect1[3] - rect1[1]) * .681), rect1[2], rect1[3])
+        rect1 = (0, img1.height * .681, img1.width, img1.height)
         img1 = img1.crop(rect1)
-        rect2 = (rect2[0], rect2[1], rect2[2], int((rect2[3] - rect2[1]) * .94))
+        rect2 = (0, 0, img2.width, img2.height * .94)
         img2 = img2.crop(rect2)
 
         cated = Image.new('RGBA', (img1.width, img1.height + img2.height))
         cated.paste(img2, (0, 0))
         cated.paste(img1, (0, img2.height))
         ui["bg"] = cated
-        offsets["abilities"] = (rect2[0], rect2[1])
-        offsets["skills"] = (rect1[0], rect1[1])  # TODO
+        offsets["abilities_crop2"] = (-rect2[0], -rect2[1])
+        offsets["skills_crop2"] = (-rect1[0], -rect1[1])
 
-        # Load SelfHero
+        # Load SelfHero 
+        # Note: SelfHero has no effect, SelfHero2 is the real one
+        # in HeroScreen3.(WindowScreenShared)
         offsets["self"], hero_ele, hero_xdb_path = \
-            self._parse_shared_from_simple(ele[2].get("href"), xdb_path, data)
+            self._parse_shared_from_simple(ele[10].get("href"), xdb_path, data)
         # Load MeetHero
         offsets["meet"], _, _ = \
             self._parse_shared_from_simple(ele[3].get("href"), xdb_path, data)
@@ -409,6 +414,35 @@ class GameInfo:
         # Generate proper ui data
         self.ui = GameInfo.UIInfo(ui["bg"], ui["icon"])
 
+        # Generate proper offset data
+        result = {"face": (0, 0), "name": (0, 0), "description": (0, 0), "line": (0, 0), "race": (0, 0), "ability":(0, 0), "skill":(0, 0)}
+        """
+        'skills_crop1', 'skills_crop2', 'meet', 
+        'herodescription', 'heroabilities', 'heroabilitiesheader', 'heroskillsheader',
+        'heroline0', 'heroline1', 'heroline2', 'heroline3', 'heroline4', 'heroslot0', 'heroslot1', 'heroslot2',
+        'heroslot3', 'heroskills', 'heroracial0', 'heroracial1', 'heroracial2', 'heroracial3', 'heroracial4'
+        """
+        # Offset for abilities
+        stack = []
+        def _sum(): return sum(i[0] for i in stack), sum(i[1] for i in stack)
+        stack.append(offsets["bg"])
+        stack.append(offsets["abilities_crop1"])
+        stack.append(offsets["abilities_crop2"])
+        stack.append(offsets["self"])
+        stack.append(offsets["heroinfo"])
+        stack.append(offsets["heroface"])
+        result["face"] = _sum()
+        stack.pop()
+        stack.append(offsets["heroname"])
+        result["name"] = _sum()
+        stack.pop()
+        stack.append(offsets['herodescription'])
+        result["description"] = _sum()
+
+
+        self.offsets = GameInfo.OffsetInfo(**result)
+        self.sizes = sizes
+
     def _parse_hero_xdb(self, data):
         root = ET.fromstring(data.get_file(GameInfo.ANY_XDB))
         with self.lock:
@@ -431,15 +465,20 @@ class GameInfo:
                 elif mastery == "MASTERY_EXPERT": return 3
                 else: return 0
 
-            race_skills = ((hero_ele.find("PrimarySkill").find("SkillID").text,
-                            _mastery2int(hero_ele.find("PrimarySkill").find("Mastery").text)), )
+            race_skills = {hero_ele.find("PrimarySkill").find("SkillID").text:
+                            _mastery2int(hero_ele.find("PrimarySkill").find("Mastery").text)}
             hero_skills = hero_ele.find("Editable").find("skills")
-            hero_skills = race_skills + tuple((i.find("SkillID").text, _mastery2int(i.find("Mastery").text))
-                                              for i in hero_skills)
+            hero_skills = [(i.find("SkillID").text, _mastery2int(i.find("Mastery").text)) for i in hero_skills]
+
+            # Move the race skill to first slot
+            race_skill = [(i[0], max(i[1], race_skills[i[0]])) for i in hero_skills if i[0] in race_skills]
+            hero_skills = [i for i in hero_skills if i[0] not in race_skills]
+            hero_skills = tuple((race_skill if len(race_skill) > 0 else list(race_skills.items())) + hero_skills)
+
             hero_perks = hero_ele.find("Editable").find("perkIDs")
             hero_perks = tuple(i.text for i in hero_perks)
             logging.info(f"  读取{self.class_info[hero_class]}英雄“{hero_name}”")
-            return hero_class, hero_name, hero_skills, hero_perks
+            return hero_class, hero_name, hero_face, hero_skills, hero_perks
 
         for i in root:
             self.heroes.append(_read_hero(i.get("href")))

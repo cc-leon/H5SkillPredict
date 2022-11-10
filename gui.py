@@ -1,10 +1,11 @@
 import logging
 import time
 import sys
+from pprint import pprint
 from threading import Thread, Lock
 from queue import Queue, Empty
-from tkinter import W, E, N, S, END
-from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Text
+from tkinter import END
+from tkinter import messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Canvas
 from tkinter.ttk import Frame, Label, Button, Progressbar
 
 from PIL import ImageTk
@@ -16,16 +17,24 @@ from persistence import Persistence
 TITLE = "英雄无敌5技能概率计算器"
 
 
-class InteractiveFrame(Frame):
-    def __init__(self, parent):
-        super(InteractiveFrame, self).__init__(parent)
-        self.bg = Label(self, border=0)
-        self.bg.grid(column=0, row=0)
+class InteractiveCanvas(Canvas):
+    def __init__(self, master=None, **kw):
+        super().__init__(master=master, **kw)
 
     def load_bg(self, bg_img):
         self.bg_img = ImageTk.PhotoImage(bg_img)
-        self.bg.config(image=self.bg_img)
+        #self.bg.config(image=self.bg_img)
 
+    def load_ui(self):
+        return
+        hero = self.info.heroes[0]
+        offsets = self.info.offsets
+        self.ka = Label()
+        self.ka.place(anchor="nw", x=offsets.face[0], y=offsets.face[1], width=128, height=128)
+        self.kaka = Label(text="英雄名字")
+        self.kaka.place(anchor="nw", x=offsets.name[0], y=offsets.name[1])
+        self.kakaka = Label(text="职业")
+        self.kakaka.place(anchor="nw", x=offsets.description[0], y=offsets.description[1])
 
 class LogWnd(Toplevel):
     class _TextHandler(logging.Handler):
@@ -85,11 +94,11 @@ class MainWnd(Tk):
         self.title(TITLE)
         self.resizable(False, False)
 
-        self.interactive_frame = InteractiveFrame(self)
-        self.interactive_frame.grid(column=0, row=0, sticky="w")
+        self.interactive_canvas = InteractiveCanvas(self)
+        self.interactive_canvas.grid(column=0, row=0, sticky="w")
 
         self.status_text = Label(self, text="已启动", border=1, relief="sunken", padding=2, font=("TkFixedFont", 10))
-        self.status_text.grid(column=0, row=2, sticky=W+E)
+        self.status_text.grid(column=0, row=2, sticky="ew")
         self.status_prog = Progressbar(self)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -128,10 +137,12 @@ class MainWnd(Tk):
 
     def _build_skill_gui(self):
         self.status_prog.grid_forget()
-        self.status_text.grid(column=0, row=2, sticky=W+E, columnspan=2)
+        self.status_text.grid(column=0, row=2, sticky="ew", columnspan=2)
         self.status_text.config(text="游戏数据加载完毕")
 
-        self.interactive_frame.load_bg(self.game_info.ui.bg)
+        self.interactive_canvas.load_bg(self.game_info.ui.bg)
+        self.interactive_canvas.info = self.game_info
+        self.interactive_canvas.load_ui()
 
     def _asking_game_data(self):
         self.withdraw()
@@ -146,8 +157,8 @@ class MainWnd(Tk):
 
         self.game_info = None
         self.deiconify()
-        self.status_text.grid(column=0, row=2, sticky=W+E, columnspan=1)
-        self.status_prog.grid(column=1, row=2, sticky=W+E)
+        self.status_text.grid(column=0, row=2, sticky="we", columnspan=1)
+        self.status_prog.grid(column=1, row=2, sticky="we")
         raw_data = RawData(h5_path)
         game_info = GameInfo()
         Thread(target=self._ask_game_data_thread, args=(raw_data, game_info)).start()
