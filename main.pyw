@@ -2,7 +2,7 @@ import logging
 from zipfile import ZipFile
 
 from gui import MainWnd
-
+from persistence import per
 
 def main():
     logging.basicConfig(level=logging.INFO, filename="H5SkillPredict.log", filemode="w",
@@ -11,10 +11,11 @@ def main():
     main_window = MainWnd()
     main_window.mainloop()
 
-from dataclasses import dataclass
 
 def test():
-    pass
+    from tkinter import Tk, font
+    root = Tk()
+    print(font.families()[-2])
 
 
 if __name__ == "__main__":
