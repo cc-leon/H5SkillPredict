@@ -2,7 +2,7 @@ import logging
 import os
 from time import time
 import xml.etree.ElementTree as ET
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from pprint import pprint
 from zipfile import BadZipFile, ZipFile
 from io import BytesIO
@@ -225,17 +225,17 @@ class GameInfo:
         with self.lock:
             self.curr_prog += 1
         self.skill_prob = {}
-        self.class_info = {}
+        self.class_info = OrderedDict()
         self.class2skill = {}
 
-        for i, j in enumerate(root[0]):
-            class_id = j.find("ID").text
+        for i in root[0]:
+            class_id = i.find("ID").text
             if "NONE" not in class_id:
-                self.skill_prob[class_id] = {}
-                ele = j.find("obj")
+                self.skill_prob[class_id] = OrderedDict()
+                ele = i.find("obj")
 
                 display_name = self._parse_txt(ele.find("NameFileRef").get("href"), self.HEROCLASS_XDB, data)
-                self.class_info[class_id] = (display_name, i)
+                self.class_info[class_id] = display_name
                 logging.info(f"  发现职业信息{class_id}({display_name})")
 
                 for k in ele.find("SkillsProbs"):
@@ -245,7 +245,7 @@ class GameInfo:
                         self.skill_prob[class_id][skill_id] = prob
                         logging.info(f"    目前职业技能{skill_id}的概率是{prob}")
                         if class_id not in self.class2skill:
-                            self.class2skill[class_id] = {}
+                            self.class2skill[class_id] = OrderedDict()
                         if skill_id not in self.class2skill[class_id]:
                             self.class2skill[class_id][skill_id] = (set(), set())
 
@@ -319,11 +319,6 @@ class GameInfo:
 
                     self.perk_info[sp_id] = GameInfo.PerkInfo(name, desc, typ, icon, grey, preq)
                     logging.info(f"  找到子技能{sp_id}({name})")
-
-        # Fill up maps
-
-        for k, v in self.perk_info.items():
-            pass
 
     def _parse_ui_xdb(self, data):
         offsets = {}
@@ -547,7 +542,7 @@ class GameInfo:
 
             hero_perks = hero_ele.find("Editable").find("perkIDs")
             hero_perks = tuple(i.text for i in hero_perks if i.text in self.perk_info)
-            logging.info(f"  读取{self.class_info[hero_class][0]}英雄“{hero_name}”")
+            logging.info(f"  读取{self.class_info[hero_class]}英雄“{hero_name}”")
             return hero_name, hero_face, hero_class, hero_id, hero_skills, hero_perks
 
         for i in root:

@@ -22,6 +22,10 @@ TITLE = "英雄无敌5技能概率计算器"
 
 def _rgb(*rgb): return "#%02x%02x%02x" % rgb 
 
+def _proc_xxx_ico(img, x=64, y=64):
+    result = img.copy()
+    result.thumbnail((x, y), Image.Resampling.LANCZOS)
+    return ImageTk.PhotoImage(result)
 
 class InteractiveCanvas(Canvas):
 
@@ -92,7 +96,6 @@ class InteractiveCanvas(Canvas):
             self.src = src
             self.ele = []
             self.tips = []
-            self.hero = Hero(gg.info.hero_info[hero_id])
             self.load(hero_id)
 
         def unload(self):
@@ -107,8 +110,8 @@ class InteractiveCanvas(Canvas):
             self.unload()
             offset = self.offset
             canvas = self.canvas
-            hero = self.hero
             hero_info = gg.info.hero_info[hero_id]
+            hero = Hero(hero_info)
             heroes_info =  gg.info.hero_info
             class_info = gg.info.class_info
             class2hero = gg.info.class2hero
@@ -118,11 +121,6 @@ class InteractiveCanvas(Canvas):
             tk_images = []
             ele = []
             tips = []
-
-            def _proc_xxx_ico(img, x=64, y=64):
-                result = img.copy()
-                result.thumbnail((x, y), Image.Resampling.LANCZOS)
-                return ImageTk.PhotoImage(result)
 
             tk_images.append(ImageTk.PhotoImage(hero_info.face))
             ele.append(canvas.create_image(*offset.face, image=tk_images[-1], anchor="nw"))
@@ -144,15 +142,14 @@ class InteractiveCanvas(Canvas):
 
             temp_offset = list(offset.name)
             temp_offset[1] += 22
-            ele.append(canvas.create_text(*temp_offset, text=class_info[hero.race][0],
+            ele.append(canvas.create_text(*temp_offset, text=class_info[hero.race],
                                           font=(per.font, 14, "bold"), 
                                           fill="white", anchor="nw"))
-            canvas.tag_bind(ele[-1], "<Button-1>", partial(canvas._race_button_click, "LALALA"))
-            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], class_info[hero.race][0],
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], class_info[hero.race],
                                                     f"点击这里选择其他的势力的英雄"))
             popup["race"] = Menu(canvas, tearoff=0)
-            for i in tuple(i[0] for i in sorted(class_info.items(), key=lambda x:x[1][1]) if i[0] != hero.race):
-                popup["race"].add_command(label=class_info[i][0], compound='left', font=(per.font, 14), 
+            for i in tuple(i[0] for i in class_info.items() if i[0] != hero.race):
+                popup["race"].add_command(label=class_info[i], compound='left', font=(per.font, 14), 
                                           command=partial(self._hero_select, random.choice(class2hero[i])))
             canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["race"]))
 
@@ -170,6 +167,7 @@ class InteractiveCanvas(Canvas):
                 tk_images.append(_proc_xxx_ico(skill_info[s[0]].icons[s[1] - 1]))
                 ele.append(canvas.create_image(*offset.slots[i][0], image=self.solid_ico, anchor="nw"))
                 ele.append(canvas.create_image(*offset.slots[i][0], image=tk_images[-1], anchor="nw"))
+                canvas.tag_bind(ele[-1], "<Button-1>", partial(self._skill_select, s[0]))
                 tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1],
                                                                  skill_info[s[0]].names[s[1] - 1],
                                                                  skill_info[s[0]].descs[s[1] - 1]))
@@ -178,19 +176,23 @@ class InteractiveCanvas(Canvas):
                     tk_images.append(_proc_xxx_ico(perk_info[p].icon))
                     ele.append(canvas.create_image(*offset.slots[i][j + 1], image=self.solid_ico, anchor="nw"))
                     ele.append(canvas.create_image(*offset.slots[i][j + 1], image=tk_images[-1], anchor="nw"))
+                    canvas.tag_bind(ele[-1], "<Button-1>", partial(self._perk_select, p))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], perk_info[p].name, perk_info[p].desc))
                 for k in range(j + 1, 3 if i != 0 else 4):
-                    ele.append(canvas.create_image(*offset.slots[i][k + 1], image=self.solid_ico, anchor="nw"))
+                    ele.append(canvas.create_image(*offset.slots[i][k + 1], image=self.empty_ico, anchor="nw"))
+                    canvas.tag_bind(ele[-1], "<Button-1>", partial(self._perk_select, s))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "点击这里选择一个新的子技能"))
 
             for j in range(i + 1, 6):
-                ele.append(canvas.create_image(*offset.slots[j][0], image=self.solid_ico, anchor="nw"))
+                ele.append(canvas.create_image(*offset.slots[j][0], image=self.empty_ico, anchor="nw"))
+                canvas.tag_bind(ele[-1], "<Button-1>", partial(self._skill_select, None))
                 tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空主技能）", "点击这里选择一个新的主技能"))
                 for k in range(3 if i != 0 else 4):
-                    ele.append(canvas.create_image(*offset.slots[j][k + 1], image=self.solid_ico, anchor="nw"))
-                    tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "点击这里选择一个新的子技能"))
+                    ele.append(canvas.create_image(*offset.slots[j][k + 1], image=self.empty_ico, anchor="nw"))
+                    tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "选择主技能之后才能选择子技能"))
 
             self.tk_images = tk_images
+            self.hero = hero
             self.ele = ele
             self.tips = tips
 
@@ -199,11 +201,34 @@ class InteractiveCanvas(Canvas):
             if self.brother is not None:
                 self.brother.load(hero_id)
 
-        def _skill_select(self, id):
-            pass
+        def _skill_select(self, id, event):
+            result = self.hero.get_select_skills(id)
+            temp = []
+            for i, j in result:
+                if i is None:
+                    temp.append((None, None, None))
+                else:
+                    temp.append((i, gg.info.skill_info[i].icons[j - 1], gg.info.skill_info[i].names[j - 1]))
+            result = temp
 
-        def _perk_select(self, id):
-            pass
+            popup = Menu(self.canvas, tearoff=0)
+            for i, j, k in result:
+                if i is None:
+                    self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico, 32, 32))
+                    popup.add_command(image=self.tk_images[-1], label="移除该技能", compound='left', font=(per.font, 14), 
+                                      command=partial(self.hero.reload_skill, id, None, None))
+                    popup.add_separator()
+                else:
+                    self.tk_images.append(_proc_xxx_ico(j, 32, 32))
+                    popup.add_command(image=self.tk_images[-1], label=k, compound='left', font=(per.font, 14), 
+                                      command=partial(self.hero.reload_skill, id, i, tuple()))
+
+            InteractiveCanvas.HeroUI.popup_menu(popup, event)
+
+        def _perk_select(self, id, event=None):
+            print(f"From perk select, {id}")
+            if id is None:
+                pass
 
         @staticmethod
         def popup_menu(pop_menu, event):
@@ -231,9 +256,6 @@ class InteractiveCanvas(Canvas):
             self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, hero_id, self, i=="src")
         self.ui_hero["src"].brother = self.ui_hero["dst"]
         self.ui_hero["dst"].brother = self.ui_hero["src"]
-
-    def _race_button_click(self, tag, event):
-        print("Race button clicked " + str(tag))
 
 
 class LogWnd(Toplevel):
