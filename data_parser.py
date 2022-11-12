@@ -11,7 +11,8 @@ from threading import Lock
 from PIL import Image, ImageChops
 
 
-from calculator import Hero
+# Global and game info
+info = None
 
 
 class RawData:
@@ -107,9 +108,10 @@ class GameInfo:
     HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreen).xdb"
     ANY_XDB = "MapObjects/_(AdvMapSharedGroup)/Heroes/Any.xdb"
     SkillInfo = namedtuple("SkillInfo", ("names", "descs", "icons"))
-    PerkInfo = namedtuple("PerkInfo", ("name", "desc", "typ", "icon", "grey", "preq", "req"))
+    PerkInfo = namedtuple("PerkInfo", ("name", "desc", "typ", "icon", "grey", "preq"))
     UIInfo = namedtuple("UIInfo", ("bg", "solid_ico", "empty_ico"))
     OffsetInfo = namedtuple("OffsetInfo", ("face", "name", "level", "slots", "ability", "skill"))
+    HeroInfo = namedtuple("HeroInfo", ("name", "face", "race", "id", "skills", "perks"))
 
     def __init__(self):
         self.class_info = None
@@ -119,10 +121,8 @@ class GameInfo:
         self.skill2perk = None
         self.skill_prob = None
         self.hero_info = None
-        self.hero_ui = None
         self.class2hero = None
         self.class2skill = None
-        self.skill2perk = None
         self.curr_stage = None
         self.ui = None
         self.offsets = None
@@ -244,6 +244,23 @@ class GameInfo:
                     if prob > 0:
                         self.skill_prob[class_id][skill_id] = prob
                         logging.info(f"    目前职业技能{skill_id}的概率是{prob}")
+                        if class_id not in self.class2skill:
+                            self.class2skill[class_id] = {}
+                        if skill_id not in self.class2skill[class_id]:
+                            self.class2skill[class_id][skill_id] = (set(), set())
+
+        # Populate self.class2skill
+        for pid, pinfo in self.perk_info.items():
+            if pinfo.typ in ("SKILLTYPE_STANDART_PERK", "SKILLTYPE_CLASS_PERK"):
+                for c in self.class2skill:
+                    if self.perk2skill[pid] in self.class2skill[c]:
+                        self.class2skill[c][self.perk2skill[pid]][0].add(pid)
+            else:
+                pinfo = pinfo.preq
+                if pinfo is not None:
+                    for c in pinfo:
+                        if self.perk2skill[pid] in self.class2skill[c]:
+                            self.class2skill[c][self.perk2skill[pid]][1].add(pid)
 
     def _parse_skills_xdb(self, data):
         root = ET.fromstring(data.get_file(self.SKILLS_XDB))
@@ -290,17 +307,17 @@ class GameInfo:
                     else:
                         grey = icon
 
-                    preq = tuple(j for j in ele.find("SkillPrerequisites"))
+                    preq = set(j for j in ele.find("SkillPrerequisites"))
                     if len(preq) > 0:
                         preq = dict(zip([j.find("Class").text
                                          for j in preq if len(j.find("dependenciesIDs")) > 0],
-                                        [tuple(k.text for k in j.find("dependenciesIDs")
-                                               if k.tag == "Item")
+                                        [set(k.text for k in j.find("dependenciesIDs")
+                                             if k.tag == "Item")
                                          for j in preq if len(j.find("dependenciesIDs")) > 0]))
                     else:
                         preq = None
 
-                    self.perk_info[sp_id] = GameInfo.PerkInfo(name, desc, typ, icon, grey, preq, {})
+                    self.perk_info[sp_id] = GameInfo.PerkInfo(name, desc, typ, icon, grey, preq)
                     logging.info(f"  找到子技能{sp_id}({name})")
 
         # Fill up maps
@@ -500,7 +517,6 @@ class GameInfo:
             self.curr_prog += 1
         root = root.find("links")
         self.hero_info = {}
-        self.hero_ui = {}
         self.class2hero = {}
 
         def _read_hero(href):
@@ -531,17 +547,15 @@ class GameInfo:
 
             hero_perks = hero_ele.find("Editable").find("perkIDs")
             hero_perks = tuple(i.text for i in hero_perks if i.text in self.perk_info)
-            logging.info(f"  读取{self.class_info[hero_class]}英雄“{hero_name}”")
+            logging.info(f"  读取{self.class_info[hero_class][0]}英雄“{hero_name}”")
             return hero_name, hero_face, hero_class, hero_id, hero_skills, hero_perks
 
         for i in root:
-            result = _read_hero(i.get("href"))
-            hero = Hero(*result[2:], self)
+            hero = GameInfo.HeroInfo(*_read_hero(i.get("href")))
             self.hero_info[hero.id] = hero
             if hero.race not in self.class2hero:
                 self.class2hero[hero.race] = []
             self.class2hero[hero.race].append(hero.id)
-            self.hero_ui[hero.id] = result[:2]
 
     @staticmethod
     def get_time_weightage():
@@ -554,3 +568,5 @@ class GameInfo:
     def get_stage(self):
         with self.lock:
             return self.curr_stage
+
+

@@ -4,6 +4,7 @@ from functools import partial
 from pprint import pprint
 from threading import Thread, Lock
 from queue import Queue, Empty
+from copy import deepcopy
 from tkinter import END
 from tkinter import font, messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Canvas
 from tkinter.ttk import Frame, Label, Button, Progressbar
@@ -11,7 +12,9 @@ from tkinter.ttk import Frame, Label, Button, Progressbar
 from PIL import ImageTk, Image
 
 from data_parser import RawData, GameInfo
+from calculator import Hero
 from persistence import per
+import data_parser as gg
 
 
 TITLE = "英雄无敌5技能概率计算器"
@@ -56,6 +59,8 @@ class InteractiveCanvas(Canvas):
 
         def showtip(self, event=None):
             x, y = event.x_root, event.y_root
+            x += 10
+            y += 10
             self.tw = Toplevel(self.canvas)
             self.tw.wm_overrideredirect(True)
             self.tw.wm_geometry("+%d+%d" % (x, y))
@@ -77,15 +82,17 @@ class InteractiveCanvas(Canvas):
             if tw: tw.destroy()
 
     class HeroUI():
-        def __init__(self, offset, hero_id, canvas):
+        def __init__(self, offset, hero_id, canvas, src):
             self.canvas = canvas
             self.offset = offset
             self.tk_images = None
             self.solid_ico = None
             self.empty_ico = None
             self.brother = None
+            self.src = src
             self.ele = []
             self.tips = []
+            self.hero = Hero(gg.info.hero_info[hero_id])
             self.load(hero_id)
 
         def unload(self):
@@ -100,36 +107,38 @@ class InteractiveCanvas(Canvas):
             self.unload()
             offset = self.offset
             canvas = self.canvas
-            hero_ui = self.canvas.info.hero_ui[hero_id]
-            heroes_ui = self.canvas.info.hero_ui
-            hero = self.canvas.info.hero_info[hero_id]
-            class_info = self.canvas.info.class_info
-            class2hero = self.canvas.info.class2hero
-            skill_info = self.canvas.info.skill_info
-            perk_info = self.canvas.info.perk_info
-            pprint(skill_info)
+            hero = self.hero
+            hero_info = gg.info.hero_info[hero_id]
+            heroes_info =  gg.info.hero_info
+            class_info = gg.info.class_info
+            class2hero = gg.info.class2hero
+            skill_info = gg.info.skill_info
+            perk_info = gg.info.perk_info
             popup = {}
             tk_images = []
             ele = []
             tips = []
-            tk_images.append(ImageTk.PhotoImage(hero_ui[1]))
+
+            def _proc_xxx_ico(img, x=64, y=64):
+                result = img.copy()
+                result.thumbnail((x, y), Image.Resampling.LANCZOS)
+                return ImageTk.PhotoImage(result)
+
+            tk_images.append(ImageTk.PhotoImage(hero_info.face))
             ele.append(canvas.create_image(*offset.face, image=tk_images[-1], anchor="nw"))
-            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], hero_ui[0],
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], hero_info.name,
                                                     f"点击这里选择其他的{class_info[hero.race][0]}英雄"))
             popup["hero"] = Menu(canvas, tearoff=0)
             for i in class2hero[hero.race]:
                 if i != hero_id:
-                    img = heroes_ui[i][1].copy()
-                    img.thumbnail((heroes_ui[i][1].width / 4, heroes_ui[i][1].height / 4),
-                                  Image.Resampling.LANCZOS)
-                    tk_images.append(ImageTk.PhotoImage(img))
-                    popup["hero"].add_command(image=tk_images[-1], label=heroes_ui[i][0], compound='left',
-                                              font=(per.font, 14), command=partial(self._menu_select, i))
+                    tk_images.append(_proc_xxx_ico(heroes_info[i].face))
+                    popup["hero"].add_command(image=tk_images[-1], label=heroes_info[i].name, compound='left',
+                                              font=(per.font, 14), command=partial(self._hero_select, i))
             canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["hero"]))
 
-            ele.append(canvas.create_text(*offset.name, text=hero_ui[0], font=(per.font, 14, "bold"), 
+            ele.append(canvas.create_text(*offset.name, text=hero_info.name, font=(per.font, 14, "bold"), 
                                           fill="grey85", anchor="nw"))
-            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], hero_ui[0],
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], hero_info.name,
                                                     f"点击这里选择其他的{class_info[hero.race][0]}英雄"))
             canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["hero"]))
 
@@ -144,7 +153,7 @@ class InteractiveCanvas(Canvas):
             popup["race"] = Menu(canvas, tearoff=0)
             for i in tuple(i[0] for i in sorted(class_info.items(), key=lambda x:x[1][1]) if i[0] != hero.race):
                 popup["race"].add_command(label=class_info[i][0], compound='left', font=(per.font, 14), 
-                                          command=partial(self._menu_select, random.choice(class2hero[i])))
+                                          command=partial(self._hero_select, random.choice(class2hero[i])))
             canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["race"]))
 
             temp_offset = list(offset.level)
@@ -152,17 +161,11 @@ class InteractiveCanvas(Canvas):
             ele.append(canvas.create_text(*temp_offset, text=f"等级：{hero.level}", font=(per.font, 14, "bold"), 
                                           fill="grey85", anchor="nw"))
 
-            def _proc_xxx_ico(img, x=64, y=64):
-                result = img.copy()
-                result.thumbnail((64, 64), Image.Resampling.LANCZOS)
-                return ImageTk.PhotoImage(result)
-
-            self.solid_ico = _proc_xxx_ico(canvas.info.ui.solid_ico)
-            self.empty_ico = _proc_xxx_ico(canvas.info.ui.empty_ico)
+            self.solid_ico = _proc_xxx_ico(gg.info.ui.solid_ico)
+            self.empty_ico = _proc_xxx_ico(gg.info.ui.empty_ico)
 
             skill_ids, perk_ids = hero.slots22dtuple()
-            i = 0
-            j = 0
+            i = -1
             for i, (s, perks) in enumerate(tuple(zip(skill_ids, perk_ids))):
                 tk_images.append(_proc_xxx_ico(skill_info[s[0]].icons[s[1] - 1]))
                 ele.append(canvas.create_image(*offset.slots[i][0], image=self.solid_ico, anchor="nw"))
@@ -170,26 +173,37 @@ class InteractiveCanvas(Canvas):
                 tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1],
                                                                  skill_info[s[0]].names[s[1] - 1],
                                                                  skill_info[s[0]].descs[s[1] - 1]))
+                j = -1
                 for j, p in enumerate(perks):
                     tk_images.append(_proc_xxx_ico(perk_info[p].icon))
                     ele.append(canvas.create_image(*offset.slots[i][j + 1], image=self.solid_ico, anchor="nw"))
                     ele.append(canvas.create_image(*offset.slots[i][j + 1], image=tk_images[-1], anchor="nw"))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], perk_info[p].name, perk_info[p].desc))
+                for k in range(j + 1, 3 if i != 0 else 4):
+                    ele.append(canvas.create_image(*offset.slots[i][k + 1], image=self.solid_ico, anchor="nw"))
+                    tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "点击这里选择一个新的子技能"))
 
-            tk_images.append(ImageTk.PhotoImage(skill_info[s[0]].icons[s[1] - 1]))
-            ele.append(canvas.create_image(*offset.slots[i][0], image=self.solid_ico, anchor="nw"))
-            ele.append(canvas.create_image(*offset.slots[i][0], image=tk_images[-1], anchor="nw"))
-            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1],
-                                                    skill_info[s[0]].names[s[1] - 1],
-                                                    skill_info[s[0]].descs[s[1] - 1]))
+            for j in range(i + 1, 6):
+                ele.append(canvas.create_image(*offset.slots[j][0], image=self.solid_ico, anchor="nw"))
+                tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空主技能）", "点击这里选择一个新的主技能"))
+                for k in range(3 if i != 0 else 4):
+                    ele.append(canvas.create_image(*offset.slots[j][k + 1], image=self.solid_ico, anchor="nw"))
+                    tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "点击这里选择一个新的子技能"))
+
             self.tk_images = tk_images
             self.ele = ele
             self.tips = tips
 
-        def _menu_select(self, hero_id):
+        def _hero_select(self, hero_id):
             self.load(hero_id)
             if self.brother is not None:
                 self.brother.load(hero_id)
+
+        def _skill_select(self, id):
+            pass
+
+        def _perk_select(self, id):
+            pass
 
         @staticmethod
         def popup_menu(pop_menu, event):
@@ -202,20 +216,19 @@ class InteractiveCanvas(Canvas):
         super().__init__(master=master, **kw)
         self.bg_img = None
         self.bg = None
-        self.info = None
         self.ui_hero = {}
 
     def load_bg(self):
         if self.bg is None:
-            self.config(width=self.info.ui.bg.width, height=self.info.ui.bg.height)
-            self.bg_img = ImageTk.PhotoImage(self.info.ui.bg)
+            self.config(width=gg.info.ui.bg.width, height=gg.info.ui.bg.height)
+            self.bg_img = ImageTk.PhotoImage(gg.info.ui.bg)
             self.bg = self.create_image(0, 0, image=self.bg_img, anchor="nw")
 
     def load_ui(self, hero_id):
         for i in ("src", "dst"):
-            offset = self.info.offsets[i]
+            offset = gg.info.offsets[i]
             if i in self.ui_hero: del self.ui_hero[i]
-            self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, hero_id, self)
+            self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, hero_id, self, i=="src")
         self.ui_hero["src"].brother = self.ui_hero["dst"]
         self.ui_hero["dst"].brother = self.ui_hero["src"]
 
@@ -271,7 +284,6 @@ class LogWnd(Toplevel):
 class MainWnd(Tk):
     def __init__(self, *args):
         super(MainWnd, self).__init__(*args)
-        self.info = None
         self.lock = Lock()
 
         self.log_wnd = LogWnd(self)
@@ -326,7 +338,6 @@ class MainWnd(Tk):
         self.status_text.grid(column=0, row=2, sticky="ew", columnspan=2)
         self.status_text.config(text="游戏数据加载完毕")
 
-        self.interactive_canvas.info = self.info
         self.interactive_canvas.load_bg()
         self.interactive_canvas.load_ui("Hero7")
 
@@ -341,10 +352,10 @@ class MainWnd(Tk):
 
         per.last_path = h5_path
 
-        self.info = None
         self.deiconify()
         self.status_text.grid(column=0, row=2, sticky="we", columnspan=1)
         self.status_prog.grid(column=1, row=2, sticky="we")
+        gg.info = None
         raw_data = RawData(h5_path)
         game_info = GameInfo()
         Thread(target=self._ask_game_data_thread, args=(raw_data, game_info)).start()
@@ -355,26 +366,26 @@ class MainWnd(Tk):
             raw_data.run()
         except ValueError as e:
             with self.lock:
-                self.info = e
+                gg.info = e
             return
 
         try:
             game_info.run(raw_data)
         except ValueError as e:
             with self.lock:
-                self.info = e
+                gg.info = e
             return
 
         with self.lock:
-            self.info = game_info
+            gg.info = game_info
 
     def _ask_game_data_after(self, raw_data, game_info):
         with self.lock:
-            if type(self.info) is ValueError:
+            if type(gg.info) is ValueError:
                 self.withdraw()
-                messagebox.showerror(TITLE, str(self.info) + "，\n请检查是否是正确的英雄无敌5安装文件夹")
+                messagebox.showerror(TITLE, str(gg.info) + "，\n请检查是否是正确的英雄无敌5安装文件夹")
                 self._asking_game_data()
-            elif type(self.info) is GameInfo:
+            elif type(gg.info) is GameInfo:
                 self._build_skill_gui()
             else:
                 status_text = ""
