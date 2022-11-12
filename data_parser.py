@@ -102,13 +102,14 @@ class RawData:
 
 class GameInfo:
     HEROCLASS_XDB = "GameMechanics/RefTables/HeroClass.xdb"
+    GHOST_XDB = "GameMechanics/RefTables/GhostMode/Classes.xdb"
     SKILLS_XDB = "GameMechanics/RefTables/Skills.xdb"
     HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreen).xdb"
     ANY_XDB = "MapObjects/_(AdvMapSharedGroup)/Heroes/Any.xdb"
-    SkillInfo = namedtuple("SkillInfo", ("names", "descs", "icons", "racial"))
+    SkillInfo = namedtuple("SkillInfo", ("names", "descs", "icons"))
     PerkInfo = namedtuple("PerkInfo", ("name", "desc", "typ", "icon", "grey", "preq", "req"))
     UIInfo = namedtuple("UIInfo", ("bg", "solid_ico", "empty_ico"))
-    OffsetInfo = namedtuple("OffsetInfo", ("face", "name", "level", "slots", "racial", "ability", "skill"))
+    OffsetInfo = namedtuple("OffsetInfo", ("face", "name", "level", "slots", "ability", "skill"))
 
     def __init__(self):
         self.class_info = None
@@ -120,6 +121,8 @@ class GameInfo:
         self.hero_info = None
         self.hero_ui = None
         self.class2hero = None
+        self.class2skill = None
+        self.skill2perk = None
         self.curr_stage = None
         self.ui = None
         self.offsets = None
@@ -223,20 +226,21 @@ class GameInfo:
             self.curr_prog += 1
         self.skill_prob = {}
         self.class_info = {}
+        self.class2skill = {}
 
-        for i in root[0]:
-            class_id = i.find("ID").text
+        for i, j in enumerate(root[0]):
+            class_id = j.find("ID").text
             if "NONE" not in class_id:
                 self.skill_prob[class_id] = {}
-                ele = i.find("obj")
+                ele = j.find("obj")
 
                 display_name = self._parse_txt(ele.find("NameFileRef").get("href"), self.HEROCLASS_XDB, data)
-                self.class_info[class_id] = display_name
+                self.class_info[class_id] = (display_name, i)
                 logging.info(f"  发现职业信息{class_id}({display_name})")
 
-                for j in ele.find("SkillsProbs"):
-                    skill_id = j.find("SkillID").text
-                    prob = int(j.find("Prob").text)
+                for k in ele.find("SkillsProbs"):
+                    skill_id = k.find("SkillID").text
+                    prob = int(k.find("Prob").text)
                     if prob > 0:
                         self.skill_prob[class_id][skill_id] = prob
                         logging.info(f"    目前职业技能{skill_id}的概率是{prob}")
@@ -254,6 +258,7 @@ class GameInfo:
             sp_id = i.find("ID").text
             if "NONE" not in sp_id:
                 ele = i.find("obj")
+                def _preproc_br(text): return text.replace("<br>", "\n")
 
                 if ele.find("SkillType").text == "SKILLTYPE_SKILL":
                     def _f(x, f): return tuple(f(j.get("href"), self.SKILLS_XDB, data)
@@ -261,8 +266,8 @@ class GameInfo:
 
                     icons = _f("Texture", self._parse_dds)
                     names = _f("NameFileRef", self._parse_txt)
-                    descs = _f("DescriptionFileRef", self._parse_txt)
-                    self.skill_info[sp_id] = GameInfo.SkillInfo(names, descs, icons, False)
+                    descs = tuple(_preproc_br(i) for i in _f("DescriptionFileRef", self._parse_txt))
+                    self.skill_info[sp_id] = GameInfo.SkillInfo(names, descs, icons)
                     logging.info(f"  找到主技能{sp_id}{str(names)}")
 
                 else:
@@ -275,7 +280,7 @@ class GameInfo:
                     def _f(x, f): return f(x.get("href"), self.SKILLS_XDB, data)
 
                     name = _f(ele.find("NameFileRef")[0], self._parse_txt)
-                    desc = _f(ele.find("DescriptionFileRef")[0], self._parse_txt)
+                    desc = _preproc_br(_f(ele.find("DescriptionFileRef")[0], self._parse_txt))
                     typ = ele.find("SkillType").text
                     icon = _f(ele.find("Texture")[1], self._parse_dds)
                     if ele.find("Texture")[0].get("href"):
@@ -299,6 +304,7 @@ class GameInfo:
                     logging.info(f"  找到子技能{sp_id}({name})")
 
         # Fill up maps
+
         for k, v in self.perk_info.items():
             pass
 
@@ -311,7 +317,8 @@ class GameInfo:
 
         # Get Background dds
         # Load HeroMeetFull related into memory
-        offsets["bg"], heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(ele[5].get("href"), xdb_path, data)
+        offsets["bg"], heromeet_ele, heromeet_xdb_path = \
+            self._parse_shared_from_simple(ele[5].get("href"), xdb_path, data)
         heromeet_ele = heromeet_ele.find("Children")[0]
         offsets["bg"] = (-offsets["bg"][0], -offsets["bg"][1])
         # Load HeroMeet related into memory
@@ -348,6 +355,7 @@ class GameInfo:
         offsets["skills_crop1"] = (-rect1[0], -rect1[1])
         offsets["abilities_crop1"] = (-rect2[0], -rect2[1])
         logging.info("  裁剪并合并Skills和Abilities的dds文件")
+        offsets["skills_crop2"] = (0, img2.height * .94 - img1.height * .681)
         rect1 = (0, img1.height * .681, img1.width, img1.height)
         img1 = img1.crop(rect1)
         rect2 = (0, 0, img2.width, img2.height * .94)
@@ -358,7 +366,6 @@ class GameInfo:
         cated.paste(img1, (0, img2.height))
         ui["bg"] = cated
         offsets["abilities_crop2"] = (-rect2[0], -rect2[1])
-        offsets["skills_crop2"] = (-rect1[0], -rect1[1])
 
         # Load SelfHero 
         # Note: SelfHero has no effect, SelfHero2 is the real one
@@ -469,7 +476,17 @@ class GameInfo:
                     stack.pop()
                 stack.pop()
             result["slots"] = tuple(tuple(j for j in i) for i in result["slots"])
-            result["racial"] = []
+            stack = [offsets["bg"], ]
+            stack.append(offsets["skills_crop2"])
+            stack.append(key_offset)
+            stack.append(offsets["heroskills"])
+            racial = []
+            for i in range(5):
+                stack.append(offsets["heroracial"][i])
+                racial.append(_sum())
+                stack.pop()
+            racial = tuple(racial)
+            result["slots"] = (racial, ) + result["slots"]
             return result
 
         offset_src = GameInfo.OffsetInfo(**_offset_routine(offsets["self"]))

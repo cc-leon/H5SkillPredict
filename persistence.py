@@ -19,6 +19,7 @@ class Persistence:
         self.show_log = True if contents[1] == "True" else False
         self.main_x, self.main_y = [int(i) for i in contents[2].split(",")]
         self.log_x, self.log_y = [int(i) for i in contents[3].split(",")]
+        self.font = "Adobe 黑体 Std R"
 
     def save(self):
         contents = (self.last_path, self.show_log, 

@@ -1,6 +1,5 @@
 import logging
-import time
-import sys
+import random
 from functools import partial
 from pprint import pprint
 from threading import Thread, Lock
@@ -9,7 +8,7 @@ from tkinter import END
 from tkinter import font, messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Canvas
 from tkinter.ttk import Frame, Label, Button, Progressbar
 
-from PIL import ImageTk
+from PIL import ImageTk, Image
 
 from data_parser import RawData, GameInfo
 from persistence import per
@@ -24,7 +23,7 @@ def _rgb(*rgb): return "#%02x%02x%02x" % rgb
 class InteractiveCanvas(Canvas):
 
     class UIToolTip():
-        WAIT_TIME = 500
+        WAIT_TIME = 100
         WRAP_LENGTH = 180
 
         def __init__(self, canvas, widget_name, name, description):
@@ -32,49 +31,43 @@ class InteractiveCanvas(Canvas):
             self.name = name
             self.description = description
             self.widget_name = widget_name
-            canvas.tag_bind(widget_name, "<Enter>", self.enter)
+            canvas.tag_bind(widget_name, "<Button-3>", self.enter)
             canvas.tag_bind(widget_name, "<Leave>", self.leave)
             canvas.tag_bind(widget_name, "<ButtonPress>", self.leave)
             self.id = None
             self.tw = None
 
-        def __del__(self):
-            try:
-                self.canvas.tag_unbind(self.widget_name, "<Enter>")
-                self.canvas.tag_unbind(self.widget_name, "<Leave>")
-                self.canvas.tag_unbind(self.widget_name, "<ButtonPress>")
-            except:
-                pass
+        def unload(self):
+            self.canvas.tag_unbind(self.widget_name, "<Button-3>")
+            self.canvas.tag_unbind(self.widget_name, "<Leave>")
+            self.canvas.tag_unbind(self.widget_name, "<ButtonPress>")
 
-        def enter(self, event=None): self.schedule()
+        def enter(self, event=None): self.schedule(event)
         def leave(self, event=None):
             self.unschedule()
             self.hidetip()
-        def schedule(self):
+        def schedule(self, event=None):
             self.unschedule()
-            self.id = self.canvas.after(InteractiveCanvas.UIToolTip.WAIT_TIME, self.showtip)
+            self.id = self.canvas.after(InteractiveCanvas.UIToolTip.WAIT_TIME, self.showtip, event)
         def unschedule(self):
             id = self.id
             self.id = None
             if id: self.canvas.after_cancel(id)
 
         def showtip(self, event=None):
-            x = y = 0
-            x, y = self.canvas.coords(self.widget_name)
-            x += self.canvas.winfo_rootx() + 25
-            y += self.canvas.winfo_rooty() + 20
+            x, y = event.x_root, event.y_root
             self.tw = Toplevel(self.canvas)
             self.tw.wm_overrideredirect(True)
             self.tw.wm_geometry("+%d+%d" % (x, y))
 
             label = Label(self.tw, text=self.name, anchor="center",
                           background="#ffffff", relief="solid", borderwidth=1,
-                          font=(self.canvas.font, 12, "bold"))
+                          font=(per.font, 12, "bold"))
             label.grid(column=0, row=0, sticky="ew")
 
             label = Label(self.tw, text=self.description, anchor="w",
                           background="#ffffff", relief="solid", borderwidth=1,
-                          font=(self.canvas.font, 12, ),
+                          font=(per.font, 12, ),
                           wraplength = InteractiveCanvas.UIToolTip.WRAP_LENGTH)
             label.grid(column=0, row=1, sticky="ew")
 
@@ -84,46 +77,122 @@ class InteractiveCanvas(Canvas):
             if tw: tw.destroy()
 
     class HeroUI():
-        def __init__(self, offset, hero_id, tag, canvas):
-            hero_ui = canvas.info.hero_ui[hero_id]
-            hero = canvas.info.hero_info[hero_id]
-            class_info = canvas.info.class_info
-            skill_info = canvas.info.skill_info
-            perk_info = canvas.info.perk_info
-            ui_info = canvas.info.ui
+        def __init__(self, offset, hero_id, canvas):
+            self.canvas = canvas
+            self.offset = offset
+            self.tk_images = None
+            self.solid_ico = None
+            self.empty_ico = None
+            self.brother = None
+            self.ele = []
+            self.tips = []
+            self.load(hero_id)
 
-            popup = Menu(canvas, tearoff=0)
-            for _ in range(15):
-                popup.add_command(image=self.face_img, label=hero_ui[0], compound='left')
-            canvas.tag_bind(ele["name"], "<Button-3>", popup_popup)
+        def unload(self):
+            for i in self.tips:
+                i.unload()
 
-            self.face_img = ImageTk.PhotoImage(hero_ui[1])
-            ele = {}
-            tips = {}
-            ele["face"] = canvas.create_image(*offset.face, image=self.face_img, anchor="nw")
-            tips["face"] = InteractiveCanvas.UIToolTip(canvas, ele["face"], hero_ui[0],
-                                                  f"点击这里选择其他的{class_info[hero.race]}英雄")
+            for i in self.ele:
+                self.canvas.tag_unbind(i, "<Button-1>")
+                self.canvas.delete(i)
 
-            ele["name"] = canvas.create_text(*offset.name, text=hero_ui[0], 
-                                             font=(canvas.font, 14, "bold"), 
-                                             fill="grey85", anchor="nw")
-            tips["name"] = InteractiveCanvas.UIToolTip(canvas, ele["name"], hero_ui[0],
-                                                  f"点击这里选择其他的{class_info[hero.race]}英雄")
+        def load(self, hero_id):
+            self.unload()
+            offset = self.offset
+            canvas = self.canvas
+            hero_ui = self.canvas.info.hero_ui[hero_id]
+            heroes_ui = self.canvas.info.hero_ui
+            hero = self.canvas.info.hero_info[hero_id]
+            class_info = self.canvas.info.class_info
+            class2hero = self.canvas.info.class2hero
+            skill_info = self.canvas.info.skill_info
+            perk_info = self.canvas.info.perk_info
+            pprint(skill_info)
+            popup = {}
+            tk_images = []
+            ele = []
+            tips = []
+            tk_images.append(ImageTk.PhotoImage(hero_ui[1]))
+            ele.append(canvas.create_image(*offset.face, image=tk_images[-1], anchor="nw"))
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], hero_ui[0],
+                                                    f"点击这里选择其他的{class_info[hero.race][0]}英雄"))
+            popup["hero"] = Menu(canvas, tearoff=0)
+            for i in class2hero[hero.race]:
+                if i != hero_id:
+                    img = heroes_ui[i][1].copy()
+                    img.thumbnail((heroes_ui[i][1].width / 4, heroes_ui[i][1].height / 4),
+                                  Image.Resampling.LANCZOS)
+                    tk_images.append(ImageTk.PhotoImage(img))
+                    popup["hero"].add_command(image=tk_images[-1], label=heroes_ui[i][0], compound='left',
+                                              font=(per.font, 14), command=partial(self._menu_select, i))
+            canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["hero"]))
+
+            ele.append(canvas.create_text(*offset.name, text=hero_ui[0], font=(per.font, 14, "bold"), 
+                                          fill="grey85", anchor="nw"))
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], hero_ui[0],
+                                                    f"点击这里选择其他的{class_info[hero.race][0]}英雄"))
+            canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["hero"]))
 
             temp_offset = list(offset.name)
             temp_offset[1] += 22
-            ele["race"] = canvas.create_text(*temp_offset, text=class_info[hero.race],
-                                             font=(canvas.font, 14, "bold"), 
-                                             fill="white", anchor="nw")
-            canvas.tag_bind(ele["race"], "<Button-1>", partial(canvas._race_button_click, "LALALA"))
-            tips["race"] = InteractiveCanvas.UIToolTip(canvas, ele["race"], class_info[hero.race],
-                                                  f"点击这里选择其他的势力的英雄")
+            ele.append(canvas.create_text(*temp_offset, text=class_info[hero.race][0],
+                                          font=(per.font, 14, "bold"), 
+                                          fill="white", anchor="nw"))
+            canvas.tag_bind(ele[-1], "<Button-1>", partial(canvas._race_button_click, "LALALA"))
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], class_info[hero.race][0],
+                                                    f"点击这里选择其他的势力的英雄"))
+            popup["race"] = Menu(canvas, tearoff=0)
+            for i in tuple(i[0] for i in sorted(class_info.items(), key=lambda x:x[1][1]) if i[0] != hero.race):
+                popup["race"].add_command(label=class_info[i][0], compound='left', font=(per.font, 14), 
+                                          command=partial(self._menu_select, random.choice(class2hero[i])))
+            canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["race"]))
 
-        def __del__(self):
-            print("Deleted")
+            temp_offset = list(offset.level)
+            temp_offset[1] += 8
+            ele.append(canvas.create_text(*temp_offset, text=f"等级：{hero.level}", font=(per.font, 14, "bold"), 
+                                          fill="grey85", anchor="nw"))
+
+            def _proc_xxx_ico(img, x=64, y=64):
+                result = img.copy()
+                result.thumbnail((64, 64), Image.Resampling.LANCZOS)
+                return ImageTk.PhotoImage(result)
+
+            self.solid_ico = _proc_xxx_ico(canvas.info.ui.solid_ico)
+            self.empty_ico = _proc_xxx_ico(canvas.info.ui.empty_ico)
+
+            skill_ids, perk_ids = hero.slots22dtuple()
+            i = 0
+            j = 0
+            for i, (s, perks) in enumerate(tuple(zip(skill_ids, perk_ids))):
+                tk_images.append(_proc_xxx_ico(skill_info[s[0]].icons[s[1] - 1]))
+                ele.append(canvas.create_image(*offset.slots[i][0], image=self.solid_ico, anchor="nw"))
+                ele.append(canvas.create_image(*offset.slots[i][0], image=tk_images[-1], anchor="nw"))
+                tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1],
+                                                                 skill_info[s[0]].names[s[1] - 1],
+                                                                 skill_info[s[0]].descs[s[1] - 1]))
+                for j, p in enumerate(perks):
+                    tk_images.append(_proc_xxx_ico(perk_info[p].icon))
+                    ele.append(canvas.create_image(*offset.slots[i][j + 1], image=self.solid_ico, anchor="nw"))
+                    ele.append(canvas.create_image(*offset.slots[i][j + 1], image=tk_images[-1], anchor="nw"))
+                    tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], perk_info[p].name, perk_info[p].desc))
+
+            tk_images.append(ImageTk.PhotoImage(skill_info[s[0]].icons[s[1] - 1]))
+            ele.append(canvas.create_image(*offset.slots[i][0], image=self.solid_ico, anchor="nw"))
+            ele.append(canvas.create_image(*offset.slots[i][0], image=tk_images[-1], anchor="nw"))
+            tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1],
+                                                    skill_info[s[0]].names[s[1] - 1],
+                                                    skill_info[s[0]].descs[s[1] - 1]))
+            self.tk_images = tk_images
+            self.ele = ele
+            self.tips = tips
+
+        def _menu_select(self, hero_id):
+            self.load(hero_id)
+            if self.brother is not None:
+                self.brother.load(hero_id)
 
         @staticmethod
-        def popup_popup(pop_menu, event):
+        def popup_menu(pop_menu, event):
             try:
                 pop_menu.tk_popup(event.x_root, event.y_root)
             finally:
@@ -135,7 +204,6 @@ class InteractiveCanvas(Canvas):
         self.bg = None
         self.info = None
         self.ui_hero = {}
-        self.font = "Adobe 黑体 Std R"
 
     def load_bg(self):
         if self.bg is None:
@@ -147,7 +215,9 @@ class InteractiveCanvas(Canvas):
         for i in ("src", "dst"):
             offset = self.info.offsets[i]
             if i in self.ui_hero: del self.ui_hero[i]
-            self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, hero_id, i, self)
+            self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, hero_id, self)
+        self.ui_hero["src"].brother = self.ui_hero["dst"]
+        self.ui_hero["dst"].brother = self.ui_hero["src"]
 
     def _race_button_click(self, tag, event):
         print("Race button clicked " + str(tag))
@@ -258,7 +328,7 @@ class MainWnd(Tk):
 
         self.interactive_canvas.info = self.info
         self.interactive_canvas.load_bg()
-        self.interactive_canvas.load_ui("Mardigo")
+        self.interactive_canvas.load_ui("Hero7")
 
     def _asking_game_data(self):
         self.withdraw()

@@ -9,7 +9,7 @@ class Hero():
         self._race = race
         self._id = id
         self._info = info
-        self.load_skills(skills, perks)
+        self.reload_skills(skills, perks)
         self._level = level
         self._history = {}
 
@@ -18,7 +18,7 @@ class Hero():
         perks = tuple(tuple(self._skills[i][1]) for i in self._skill_list)
         return skills, perks
 
-    def load_skills(self, skills, perks):
+    def reload_skills(self, skills, perks):
         self._skills = {}
         self._skill_list = []
         self._perks_set = set()
@@ -29,6 +29,12 @@ class Hero():
         for perk in perks:
             self._perks_set.add(perk)
             self._skills[self._info.perk2skill[perk]][1].append(perk)
+
+    def reload_skill(self, skill, perks, old_skill=None):
+        pass
+
+    def _compress_slots(self):
+        pass
 
     @property
     def race(self):
