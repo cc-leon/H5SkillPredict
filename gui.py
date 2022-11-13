@@ -45,9 +45,12 @@ class InteractiveCanvas(Canvas):
             self.tw = None
 
         def unload(self):
-            self.canvas.tag_unbind(self.widget_name, "<Button-3>")
-            self.canvas.tag_unbind(self.widget_name, "<Leave>")
-            self.canvas.tag_unbind(self.widget_name, "<ButtonPress>")
+            try:
+                self.canvas.tag_unbind(self.widget_name, "<Button-3>")
+                self.canvas.tag_unbind(self.widget_name, "<Leave>")
+                self.canvas.tag_unbind(self.widget_name, "<ButtonPress>")
+            except:
+                pass
 
         def enter(self, event=None): self.schedule(event)
         def leave(self, event=None):
@@ -86,7 +89,7 @@ class InteractiveCanvas(Canvas):
             if tw: tw.destroy()
 
     class HeroUI():
-        def __init__(self, offset, hero_id, canvas, src):
+        def __init__(self, offset, canvas, src):
             self.canvas = canvas
             self.offset = offset
             self.tk_images = None
@@ -96,7 +99,6 @@ class InteractiveCanvas(Canvas):
             self.src = src
             self.ele = []
             self.tips = []
-            self.load(hero_id)
 
         def unload(self):
             for i in self.tips:
@@ -106,12 +108,18 @@ class InteractiveCanvas(Canvas):
                 self.canvas.tag_unbind(i, "<Button-1>")
                 self.canvas.delete(i)
 
-        def load(self, hero_id):
+        @property
+        def hero(self): return self._hero
+
+        @hero.setter
+        def hero(self, new_hero):
             self.unload()
+            self._hero = new_hero
+
             offset = self.offset
             canvas = self.canvas
-            hero_info = gg.info.hero_info[hero_id]
-            hero = Hero(hero_info)
+            hero_info = gg.info.hero_info[new_hero.id]
+            hero = new_hero
             heroes_info =  gg.info.hero_info
             class_info = gg.info.class_info
             class2hero = gg.info.class2hero
@@ -128,10 +136,10 @@ class InteractiveCanvas(Canvas):
                                                     f"点击这里选择其他的{class_info[hero.race][0]}英雄"))
             popup["hero"] = Menu(canvas, tearoff=0)
             for i in class2hero[hero.race]:
-                if i != hero_id:
+                if i != hero.id:
                     tk_images.append(_proc_xxx_ico(heroes_info[i].face))
-                    popup["hero"].add_command(image=tk_images[-1], label=heroes_info[i].name, compound='left',
-                                              font=(per.font, 14), command=partial(self._hero_select, i))
+                    popup["hero"].add_command(image=tk_images[-1], label=heroes_info[i].name, compound="left",
+                                              font=(per.font, 14), command=partial(self.hero_select, i))
             canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["hero"]))
 
             ele.append(canvas.create_text(*offset.name, text=hero_info.name, font=(per.font, 14, "bold"), 
@@ -149,8 +157,8 @@ class InteractiveCanvas(Canvas):
                                                     f"点击这里选择其他的势力的英雄"))
             popup["race"] = Menu(canvas, tearoff=0)
             for i in tuple(i[0] for i in class_info.items() if i[0] != hero.race):
-                popup["race"].add_command(label=class_info[i], compound='left', font=(per.font, 14), 
-                                          command=partial(self._hero_select, random.choice(class2hero[i])))
+                popup["race"].add_command(label=class_info[i], compound="left", font=(per.font, 14), 
+                                          command=partial(self.hero_select, random.choice(class2hero[i])))
             canvas.tag_bind(ele[-1], "<Button-1>", partial(InteractiveCanvas.HeroUI.popup_menu, popup["race"]))
 
             temp_offset = list(offset.level)
@@ -176,59 +184,84 @@ class InteractiveCanvas(Canvas):
                     tk_images.append(_proc_xxx_ico(perk_info[p].icon))
                     ele.append(canvas.create_image(*offset.slots[i][j + 1], image=self.solid_ico, anchor="nw"))
                     ele.append(canvas.create_image(*offset.slots[i][j + 1], image=tk_images[-1], anchor="nw"))
-                    canvas.tag_bind(ele[-1], "<Button-1>", partial(self._perk_select, p))
+                    canvas.tag_bind(ele[-1], "<Button-1>", partial(self._perk_select, s[0], p))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], perk_info[p].name, perk_info[p].desc))
                 for k in range(j + 1, 3 if i != 0 else 4):
                     ele.append(canvas.create_image(*offset.slots[i][k + 1], image=self.empty_ico, anchor="nw"))
-                    canvas.tag_bind(ele[-1], "<Button-1>", partial(self._perk_select, s))
+                    canvas.tag_bind(ele[-1], "<Button-1>", partial(self._perk_select, s[0], None))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "点击这里选择一个新的子技能"))
 
             for j in range(i + 1, 6):
                 ele.append(canvas.create_image(*offset.slots[j][0], image=self.empty_ico, anchor="nw"))
                 canvas.tag_bind(ele[-1], "<Button-1>", partial(self._skill_select, None))
                 tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空主技能）", "点击这里选择一个新的主技能"))
-                for k in range(3 if i != 0 else 4):
+                for k in range(3 if j != 0 else 4):
                     ele.append(canvas.create_image(*offset.slots[j][k + 1], image=self.empty_ico, anchor="nw"))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "选择主技能之后才能选择子技能"))
 
             self.tk_images = tk_images
-            self.hero = hero
             self.ele = ele
             self.tips = tips
 
-        def _hero_select(self, hero_id):
-            self.load(hero_id)
+        def hero_select(self, hero_id):
+            self.hero = Hero(gg.info.hero_info[hero_id])
             if self.brother is not None:
-                self.brother.load(hero_id)
+                self.brother.hero = Hero(gg.info.hero_info[hero_id])
 
         def _skill_select(self, id, event):
-            result = self.hero.get_select_skills(id)
+            result = self._hero.get_select_skills(id)
             temp = []
             for i, j in result:
                 if i is None:
                     temp.append((None, None, None))
                 else:
-                    temp.append((i, gg.info.skill_info[i].icons[j - 1], gg.info.skill_info[i].names[j - 1]))
+                    temp.append(((i, j), gg.info.skill_info[i].icons[j - 1], gg.info.skill_info[i].names[j - 1]))
             result = temp
 
             popup = Menu(self.canvas, tearoff=0)
             for i, j, k in result:
                 if i is None:
-                    self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico, 32, 32))
-                    popup.add_command(image=self.tk_images[-1], label="移除该技能", compound='left', font=(per.font, 14), 
-                                      command=partial(self.hero.reload_skill, id, None, None))
+                    self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico))
+                    popup.add_command(image=self.tk_images[-1], label="移除该主技能", compound="left", font=(per.font, 14), 
+                                      command=partial(self._on_skill_perk_menu, id, None))
                     popup.add_separator()
                 else:
-                    self.tk_images.append(_proc_xxx_ico(j, 32, 32))
-                    popup.add_command(image=self.tk_images[-1], label=k, compound='left', font=(per.font, 14), 
-                                      command=partial(self.hero.reload_skill, id, i, tuple()))
+                    self.tk_images.append(_proc_xxx_ico(j))
+                    popup.add_command(image=self.tk_images[-1], label=k, compound="left", font=(per.font, 14), 
+                                      command=partial(self._on_skill_perk_menu, id, i))
 
             InteractiveCanvas.HeroUI.popup_menu(popup, event)
 
-        def _perk_select(self, id, event=None):
-            print(f"From perk select, {id}")
-            if id is None:
-                pass
+        def _perk_select(self, sid, pid, event):
+            result = [None, None, None, None]
+            result[0], result[1], result[2], result[3] = self._hero.get_select_perks(sid, pid)
+            popup = Menu(self.canvas, tearoff=0)
+
+            def _add_items_to_menu(result):
+                for i in result:
+                    if i is None:
+                        self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico))
+                        popup.add_command(image=self.tk_images[-1], label="移除该子技能", compound="left",
+                                          font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, None))
+                        popup.add_separator()
+                    else:
+                        self.tk_images.append(_proc_xxx_ico(gg.info.perk_info[i].icon))
+                        popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[i].name, compound="left",
+                                          font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, i))
+
+            _add_items_to_menu(result[0])
+            if len(result[0]) > 0:
+                popup.add_separator()
+            _add_items_to_menu(result[1])
+            print(result[2], result[3])
+            InteractiveCanvas.HeroUI.popup_menu(popup, event)
+
+        def _on_skill_perk_menu(self, old_id, id):
+            if old_id in gg.info.skill_info or (id is not None and id[0] in gg.info.skill_info):
+                self._hero.replace_skill(old_id, id)
+            else:
+                self._hero.replace_perk(old_id, id)
+            self.hero = self._hero
 
         @staticmethod
         def popup_menu(pop_menu, event):
@@ -253,10 +286,10 @@ class InteractiveCanvas(Canvas):
         for i in ("src", "dst"):
             offset = gg.info.offsets[i]
             if i in self.ui_hero: del self.ui_hero[i]
-            self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, hero_id, self, i=="src")
+            self.ui_hero[i] = InteractiveCanvas.HeroUI(offset, self, i=="src")
         self.ui_hero["src"].brother = self.ui_hero["dst"]
+        self.ui_hero["src"].hero_select(hero_id)
         self.ui_hero["dst"].brother = self.ui_hero["src"]
-
 
 class LogWnd(Toplevel):
     class _TextHandler(logging.Handler):
@@ -361,7 +394,7 @@ class MainWnd(Tk):
         self.status_text.config(text="游戏数据加载完毕")
 
         self.interactive_canvas.load_bg()
-        self.interactive_canvas.load_ui("Hero7")
+        self.interactive_canvas.load_ui("Mardigo")
 
     def _asking_game_data(self):
         self.withdraw()

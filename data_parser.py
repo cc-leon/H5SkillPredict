@@ -107,8 +107,8 @@ class GameInfo:
     SKILLS_XDB = "GameMechanics/RefTables/Skills.xdb"
     HEROSCREEN3_XDB = "UI/HeroScreen3.(WindowScreen).xdb"
     ANY_XDB = "MapObjects/_(AdvMapSharedGroup)/Heroes/Any.xdb"
-    SkillInfo = namedtuple("SkillInfo", ("names", "descs", "icons"))
-    PerkInfo = namedtuple("PerkInfo", ("name", "desc", "typ", "icon", "grey", "preq"))
+    SkillInfo = namedtuple("SkillInfo", ("names", "descs", "icons", "name"))
+    PerkInfo = namedtuple("PerkInfo", ("name", "desc", "typ", "icon", "grey", "preq", "req"))
     UIInfo = namedtuple("UIInfo", ("bg", "solid_ico", "empty_ico"))
     OffsetInfo = namedtuple("OffsetInfo", ("face", "name", "level", "slots", "ability", "skill"))
     HeroInfo = namedtuple("HeroInfo", ("name", "face", "race", "id", "skills", "perks"))
@@ -283,9 +283,14 @@ class GameInfo:
 
                     icons = _f("Texture", self._parse_dds)
                     names = _f("NameFileRef", self._parse_txt)
+                    name = []
+                    for i in range(len(names[0]) - 1, -1, -1):
+                        if names[0][i] == names[1][i]: name.insert(0, names[0][i])
+                        else: break
+                    name = "".join(name[1:])
                     descs = tuple(_preproc_br(i) for i in _f("DescriptionFileRef", self._parse_txt))
-                    self.skill_info[sp_id] = GameInfo.SkillInfo(names, descs, icons)
-                    logging.info(f"  找到主技能{sp_id}{str(names)}")
+                    self.skill_info[sp_id] = GameInfo.SkillInfo(names, descs, icons, name)
+                    logging.info(f"  找到主技能{sp_id}({name})")
 
                 else:
                     perk_skill = ele.find("BasicSkillID").text
@@ -315,10 +320,18 @@ class GameInfo:
                                              if k.tag == "Item")
                                          for j in preq if len(j.find("dependenciesIDs")) > 0]))
                     else:
-                        preq = None
+                        preq = {}
 
-                    self.perk_info[sp_id] = GameInfo.PerkInfo(name, desc, typ, icon, grey, preq)
+                    self.perk_info[sp_id] = GameInfo.PerkInfo(name, desc, typ, icon, grey, preq, {})
                     logging.info(f"  找到子技能{sp_id}({name})")
+
+        for pid, preq in self.perk_info.items():
+            preq = preq.preq
+            for c, preq_ids in preq.items():
+                for preq_id in preq_ids:
+                    if c not in self.perk_info[preq_id].req:
+                        self.perk_info[preq_id].req[c] = set()
+                    self.perk_info[preq_id].req[c].add(pid)
 
     def _parse_ui_xdb(self, data):
         offsets = {}
