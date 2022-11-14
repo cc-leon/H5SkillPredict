@@ -22,6 +22,30 @@ class Hero():
         result.__dict__.update(self.__dict__)
         return result
 
+    def _self_num_perks(self, skill_id):
+        if skill_id not in self._skills:
+            return None
+        else:
+            result = len([i for i in self._skills[skill_id][1] if gg.info.perk_info[i].typ != "SKILLTYPE_UINQUE_PERK"])
+            return result
+
+    @staticmethod
+    def _list_num_perks(perk_list):
+        return len([i for i in perk_list if gg.info.perk_info[i].typ != "SKILLTYPE_UINQUE_PERK"])
+
+    def _build_remove_order(self, skill):
+        result = []
+        remaining = [i for i in self._skills[skill][1] if gg.info.perk_info[i].typ != "SKILLTYPE_UINQUE_PERK"]
+        i = -1
+        while len(remaining) > 0:
+            if len(set(self._get_perk_full_list(remaining[i], False)).intersection(remaining)) == 0:
+                result.append(remaining[i])
+                remaining.pop()
+                i = -1
+            else:
+                i -= 1
+        return result
+
     def __deepcopy__(self, memo):
         cls = self.__class__
         result = cls.__new__(cls)
@@ -43,19 +67,24 @@ class Hero():
         result = [i for i in perks]
         for i in perks:
             temp = self._get_perk_full_list(i, is_preq)
-            result = temp + result
+            if is_preq is True:
+                result = temp + result
+            else:
+                result += temp
         return result
 
     def _get_skill_need(self, perk):
         preqs = self._get_perk_full_list(perk, True)
         skill_need = {}
-        skill_need[gg.info.perk2skill[perk]] = {perk, }
         for preq in preqs:
             if preq not in self._perks_set:
                 skill_id = gg.info.perk2skill[preq] 
                 if skill_id not in skill_need:
-                    skill_need[skill_id] = set()
-                skill_need[skill_id].add(preq)
+                    skill_need[skill_id] = []
+                skill_need[skill_id].append(preq)
+        if gg.info.perk2skill[perk] not in skill_need:
+            skill_need[gg.info.perk2skill[perk]] = []
+        skill_need[gg.info.perk2skill[perk]].append(perk)
         return skill_need
 
     def _can_accept_skills(self, skill_need, old_perk):
@@ -82,9 +111,9 @@ class Hero():
                     (freed_up[skill] if skill in freed_up else 0)
                 max_slots = 4 if next(iter(self._skills.keys())) == skill else 3
                 if slots_need > max_slots:
-                    result.append(f"主技能{gg.info.skill_info[skill].name}空槽不够，即使专家级后"
-                                  f"仍需要{len(skill_need[skill])}个额空槽来学习"
-                                  "{}".format("、".join(gg.info.perk_info[p].name for p in skill_need[skill])))
+                    result.append("需要学习子技能{}，主技能{}空槽不够".format(
+                        "、".join(gg.info.perk_info[p].name for p in skill_need[skill]),
+                        gg.info.skill_info[skill].name))
         if empty_skills < len(new_skills_need):
             result.append(f"该英雄只有{empty_skills}主技能空槽，但是需要学习" + \
                           "{}".format("、".join(new_skills_need)) + \
@@ -119,24 +148,29 @@ class Hero():
             levels_added = skill[1] + len(perks)
             self._skills[skill[0]] = [skill[1], perks]
         elif skill is None:
-            levels_removed = self._skills[old_skill][0] + len(self._skills[old_skill][1])
-            self._perks_set -= set(self._skills[old_skill][1])
+            levels_removed = self._skills[old_skill][0]
+            to_remove = self._build_remove_order(old_skill)
+            for i in to_remove:
+                self.replace_perk(i, None)
             del self._skills[old_skill]
         elif old_skill is not None and skill is not None:
-            if old_skill == skill[0]:
-                if perks is not None:
-                    self._skills[old_skill][1] = perks
-                    levels_added += len(perks)
-                    levels_removed += len(self._skills[old_skill][1])
+            if perks is not None:
+                self._skills[old_skill][1] = perks
+                levels_added += len(perks)
+                levels_removed += len(self._skills[old_skill][1])
 
+            if old_skill == skill[0]:
                 if self._skills[old_skill][0] < skill[1]:
                     levels_added += skill[1] - self._skills[old_skill][0]
                 elif self._skills[old_skill][0] > skill[1]:
                     levels_removed += self._skills[old_skill][0] - skill[1]
-                    to_remove = deepcopy(self._skills[old_skill][1])
-                    for i in self._skills[old_skill][1]:
-                        self._get_perk_full_list(i, True)
-
+                    if perks is None:
+                        num_perks_to_remove = self._self_num_perks(old_skill) - skill[1]
+                        if num_perks_to_remove > 0:
+                            to_remove = self._build_remove_order(old_skill)
+                            import pdb; pdb.set_trace()
+                            for i in to_remove[:num_perks_to_remove]:
+                                self.replace_perk(i, None)
                 self._skills[old_skill][0] = skill[1]
             else:
                 levels_added = skill[1]
@@ -157,7 +191,7 @@ class Hero():
 
         if old_perk is not None:
             result = self._get_perk_full_list(old_perk, False)
-            result = set(result).intersection(self._skills[gg.info.perk2skill[old_perk]][1])
+            result = set(result).intersection(self._perks_set)
             result.add(old_perk)
             levels_removed += len(result)
             for i in result:
@@ -206,10 +240,11 @@ class Hero():
         pass
 
     def get_select_perks(self, sid, pid=None):
+        remove = False
         standard = list(set(gg.info.class2skill[self._race][sid][0]) - set(self._skills[sid][1]) - {pid, })
         special = set(gg.info.class2skill[self._race][sid][1]) - set(self._skills[sid][1]) - {pid, }
         if pid is not None:
-            standard.insert(0, None)
+            remove = True
         unlearnable = []
         reasons = []
 
@@ -221,7 +256,8 @@ class Hero():
                 reasons.append(reason)
         special -= set(unlearnable)
         special = list(special)
-        return standard, special, unlearnable, reasons
+
+        return remove, standard, special, unlearnable, reasons
 
     def get_levelup_perks(self):
         pass

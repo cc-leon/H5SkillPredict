@@ -144,7 +144,7 @@ class GameInfo:
                     (lambda : 0, )),
             RunInfo(GameInfo.ANY_XDB, self._parse_hero_xdb,
                     "解析完毕，加载了{}个英雄",
-                    (lambda : 0, ))
+                    (lambda : len(self.hero_info), ))
         )
 
         for info in run_info:
@@ -555,7 +555,7 @@ class GameInfo:
 
             hero_perks = hero_ele.find("Editable").find("perkIDs")
             hero_perks = tuple(i.text for i in hero_perks if i.text in self.perk_info)
-            logging.info(f"  读取{self.class_info[hero_class]}英雄“{hero_name}”")
+            logging.info(f"  读取{self.class_info[hero_class]}英雄“{hero_id}({hero_name})”")
             return hero_name, hero_face, hero_class, hero_id, hero_skills, hero_perks
 
         for i in root:

@@ -3,6 +3,7 @@ from zipfile import ZipFile
 
 from gui import MainWnd
 from persistence import per
+from tkinter import font
 
 
 def main():
@@ -14,12 +15,11 @@ def main():
 
 
 def test():
-    from collections import OrderedDict
-    a = OrderedDict({"c":1, "a":2, "b":3 })
-    b = dict(a)
-    from pprint import pprint
-    for k, v in a.items():
-        print(k, v)
+    from tkinter import Tk
+    root = Tk()
+    for i in font.families():
+        if "黑" in i.lower():
+            print(i)
 
 if __name__ == "__main__":
     main()

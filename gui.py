@@ -198,6 +198,9 @@ class InteractiveCanvas(Canvas):
                 for k in range(3 if j != 0 else 4):
                     ele.append(canvas.create_image(*offset.slots[j][k + 1], image=self.empty_ico, anchor="nw"))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "选择主技能之后才能选择子技能"))
+                    canvas.tag_bind(ele[-1], "<Button-1>", 
+                                    partial(InteractiveCanvas.HeroUI._show_msg, messagebox.showwarning,
+                                            "选择主技能之后才能选择子技能！"))
 
             self.tk_images = tk_images
             self.ele = ele
@@ -233,27 +236,34 @@ class InteractiveCanvas(Canvas):
             InteractiveCanvas.HeroUI.popup_menu(popup, event)
 
         def _perk_select(self, sid, pid, event):
-            result = [None, None, None, None]
-            result[0], result[1], result[2], result[3] = self._hero.get_select_perks(sid, pid)
+            result = [None, None, None, None, None]
+            result[0], result[1], result[2], result[3], result[4] = self._hero.get_select_perks(sid, pid)
             popup = Menu(self.canvas, tearoff=0)
 
             def _add_items_to_menu(result):
                 for i in result:
-                    if i is None:
-                        self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico))
-                        popup.add_command(image=self.tk_images[-1], label="移除该子技能", compound="left",
-                                          font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, None))
-                        popup.add_separator()
-                    else:
-                        self.tk_images.append(_proc_xxx_ico(gg.info.perk_info[i].icon))
-                        popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[i].name, compound="left",
-                                          font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, i))
+                    self.tk_images.append(_proc_xxx_ico(gg.info.perk_info[i].icon))
+                    popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[i].name, compound="left",
+                                        font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, i))
 
-            _add_items_to_menu(result[0])
-            if len(result[0]) > 0:
+            if result[0] is True:
+                self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico))
+                popup.add_command(image=self.tk_images[-1], label="移除该子技能", compound="left",
+                                    font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, None))
+            if len(result[1]) > 0 and result[0] is True:
                 popup.add_separator()
             _add_items_to_menu(result[1])
-            print(result[2], result[3])
+            if len(result[2]) > 0:
+                popup.add_separator()
+            _add_items_to_menu(result[2])
+            if len(result[3]) > 0:
+                popup.add_separator()
+            for i in result[3]:
+                self.tk_images.append(_proc_xxx_ico(gg.info.perk_info[i].icon))
+                popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[i].name, compound="left",
+                                    font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, i))
+
+            print(result[3], result[4])
             InteractiveCanvas.HeroUI.popup_menu(popup, event)
 
         def _on_skill_perk_menu(self, old_id, id):
@@ -269,6 +279,10 @@ class InteractiveCanvas(Canvas):
                 pop_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 pop_menu.grab_release()
+
+        @staticmethod
+        def _show_msg(func, msg, event=None):
+            func(TITLE, msg)
 
     def __init__(self, master=None, **kw):
         super().__init__(master=master, **kw)
