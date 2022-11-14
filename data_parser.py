@@ -560,6 +560,7 @@ class GameInfo:
 
         for i in root:
             hero = GameInfo.HeroInfo(*_read_hero(i.get("href")))
+            if hero.id in self.hero_info: continue
             self.hero_info[hero.id] = hero
             if hero.race not in self.class2hero:
                 self.class2hero[hero.race] = []

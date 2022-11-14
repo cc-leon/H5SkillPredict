@@ -15,11 +15,10 @@ def main():
 
 
 def test():
-    from tkinter import Tk
-    root = Tk()
-    for i in font.families():
-        if "黑" in i.lower():
-            print(i)
+    a = [1, 3, 4, 5, 6]
+    print([i > 1 for i in a])
+    print(any(i > 1 for i in a))
+
 
 if __name__ == "__main__":
     main()

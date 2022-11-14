@@ -9,7 +9,7 @@ from tkinter import END
 from tkinter import font, messagebox, filedialog, Tk, Menu, scrolledtext, Toplevel, Canvas
 from tkinter.ttk import Frame, Label, Button, Progressbar
 
-from PIL import ImageTk, Image
+from PIL import ImageTk, Image, ImageOps
 
 from data_parser import RawData, GameInfo
 from calculator import Hero
@@ -26,6 +26,9 @@ def _proc_xxx_ico(img, x=64, y=64):
     result = img.copy()
     result.thumbnail((x, y), Image.Resampling.LANCZOS)
     return ImageTk.PhotoImage(result)
+
+def _show_msg(func, msg, event=None):
+    func(TITLE, msg)
 
 class InteractiveCanvas(Canvas):
 
@@ -199,8 +202,7 @@ class InteractiveCanvas(Canvas):
                     ele.append(canvas.create_image(*offset.slots[j][k + 1], image=self.empty_ico, anchor="nw"))
                     tips.append(InteractiveCanvas.UIToolTip(canvas, ele[-1], "（空子技能）", "选择主技能之后才能选择子技能"))
                     canvas.tag_bind(ele[-1], "<Button-1>", 
-                                    partial(InteractiveCanvas.HeroUI._show_msg, messagebox.showwarning,
-                                            "选择主技能之后才能选择子技能！"))
+                                    partial(_show_msg, messagebox.showwarning, "选择主技能之后才能选择子技能！"))
 
             self.tk_images = tk_images
             self.ele = ele
@@ -246,24 +248,22 @@ class InteractiveCanvas(Canvas):
                     popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[i].name, compound="left",
                                         font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, i))
 
-            if result[0] is True:
+            if len(result[0]) > 0:
                 self.tk_images.append(_proc_xxx_ico(gg.info.ui.empty_ico))
                 popup.add_command(image=self.tk_images[-1], label="移除该子技能", compound="left",
-                                    font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, None))
-            if len(result[1]) > 0 and result[0] is True:
-                popup.add_separator()
-            _add_items_to_menu(result[1])
+                                  font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, None))
+                if any(len(result[i]) > 0 for i in range(1, 4)): popup.add_separator()
+            if len(result[1]) > 0:
+                _add_items_to_menu(result[1])
+                if any(len(result[i]) > 0 for i in range(2, 4)): popup.add_separator()
             if len(result[2]) > 0:
-                popup.add_separator()
-            _add_items_to_menu(result[2])
-            if len(result[3]) > 0:
-                popup.add_separator()
-            for i in result[3]:
-                self.tk_images.append(_proc_xxx_ico(gg.info.perk_info[i].icon))
-                popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[i].name, compound="left",
-                                    font=(per.font, 14), command=partial(self._on_skill_perk_menu, pid, i))
-
-            print(result[3], result[4])
+                _add_items_to_menu(result[2])
+                if len(result[3]) > 0: popup.add_separator()
+            for i, j in enumerate(result[3]):
+                self.tk_images.append(_proc_xxx_ico(gg.info.perk_info[j].icon.convert("LA").convert("RGBA")))
+                popup.add_command(image=self.tk_images[-1], label=gg.info.perk_info[j].name, compound="left",
+                                 font=(per.font, 14),
+                                 command=partial(_show_msg, messagebox.showerror, "\n".join(result[4][i])))
             InteractiveCanvas.HeroUI.popup_menu(popup, event)
 
         def _on_skill_perk_menu(self, old_id, id):
@@ -272,6 +272,8 @@ class InteractiveCanvas(Canvas):
             else:
                 self._hero.replace_perk(old_id, id)
             self.hero = self._hero
+            self.hero.compromise(self.brother._hero, self.src)
+            self.brother.hero = self.brother._hero
 
         @staticmethod
         def popup_menu(pop_menu, event):
@@ -279,10 +281,6 @@ class InteractiveCanvas(Canvas):
                 pop_menu.tk_popup(event.x_root, event.y_root)
             finally:
                 pop_menu.grab_release()
-
-        @staticmethod
-        def _show_msg(func, msg, event=None):
-            func(TITLE, msg)
 
     def __init__(self, master=None, **kw):
         super().__init__(master=master, **kw)
@@ -295,6 +293,8 @@ class InteractiveCanvas(Canvas):
             self.config(width=gg.info.ui.bg.width, height=gg.info.ui.bg.height)
             self.bg_img = ImageTk.PhotoImage(gg.info.ui.bg)
             self.bg = self.create_image(0, 0, image=self.bg_img, anchor="nw")
+            self.create_text(170, 50, text="起点状态", font=(per.font, 20, "bold"), fill=_rgb(41, 71, 97), anchor="nw")
+            self.create_text(530, 50, text="终点状态", font=(per.font, 20, "bold"), fill=_rgb(41, 71, 97), anchor="nw")
 
     def load_ui(self, hero_id):
         for i in ("src", "dst"):
@@ -304,6 +304,7 @@ class InteractiveCanvas(Canvas):
         self.ui_hero["src"].brother = self.ui_hero["dst"]
         self.ui_hero["src"].hero_select(hero_id)
         self.ui_hero["dst"].brother = self.ui_hero["src"]
+
 
 class LogWnd(Toplevel):
     class _TextHandler(logging.Handler):
@@ -386,21 +387,27 @@ class MainWnd(Tk):
     def _build_top_menu(self):
         self.top_menu = Menu(self)
         self.config(menu=self.top_menu)
-
+        self.top_menu.add_command(label="计算概率", command=self._on_menu_calculate)
         self.top_menu.add_command(label="", command=self._on_menu_showlog)
         per.show_log = not per.show_log
         self._on_menu_showlog()
 
-    def _on_menu_showlog(self, **kwargs):
+    def _on_menu_calculate(self):
+        buffer_level = 0
+        new_skills = True
+        self.interactive_canvas.ui_hero["src"].hero.calculate(buffer_level, new_skills)
+
+    def _on_menu_showlog(self, event=None):
         if per.show_log:
             new_text = "显示日志"
-            #self.log_box.grid_forget()
+            self.log_wnd.withdraw()
         else:
             new_text = "隐藏日志"
-            #self.log_box.grid(column=0, row=1, sticky=W + E, columnspan=2)
+            self.log_wnd.deiconify()
+            self.focus_set()
 
         per.show_log = not per.show_log
-        self.top_menu.entryconfig(1, label=new_text)
+        self.top_menu.entryconfig(2, label=new_text)
 
     def _build_skill_gui(self):
         self.status_prog.grid_forget()
