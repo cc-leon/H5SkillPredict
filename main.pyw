@@ -14,11 +14,32 @@ def main():
     main_window.mainloop()
 
 
-def test():
-    a = [1, 3, 4, 5, 6]
-    print([i > 1 for i in a])
-    print(any(i > 1 for i in a))
+class A:
+    def __init__(self, name):
+        self.name = name
 
+    def __hash__(self): return hash(self.name)
+
+    def __eq__(self, other):
+        return self.name == other.name
+
+    def __ne__(self, other):
+        return not self.__ne__(other)
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.__str__()
+
+def test():
+    a = A("cat")
+    aa = {}
+    aa[a] = 123
+    a.name = "dog"
+    print(aa)
+
+    print(aa)
 
 if __name__ == "__main__":
     main()

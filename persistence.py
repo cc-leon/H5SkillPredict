@@ -2,8 +2,6 @@ import os
 from ctypes import windll, byref, create_unicode_buffer, create_string_buffer
 
 
-
-
 class Persistence:
     FILE_NAME = "H5SkillPredict.ini"
 
@@ -22,7 +20,7 @@ class Persistence:
         self.font = "黑体"
 
     def save(self):
-        contents = (self.last_path, self.show_log, 
+        contents = (self.last_path, self.show_log,
                     f"{self.main_x},{self.main_y}",
                     f"{self.log_x},{self.log_y}")
 
@@ -32,7 +30,7 @@ class Persistence:
 
     @staticmethod
     def loadfont(fontpath, private=True, enumerable=False):
-        FR_PRIVATE  = 0x10
+        FR_PRIVATE = 0x10
         FR_NOT_ENUM = 0x20
 
         if isinstance(fontpath, str):

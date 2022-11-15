@@ -1,13 +1,13 @@
 import logging
 import os
-from time import time
 import xml.etree.ElementTree as ET
+from time import time
 from collections import namedtuple, OrderedDict
 from pprint import pprint
 from zipfile import BadZipFile, ZipFile
 from io import BytesIO
 from threading import Lock
-1
+
 from PIL import Image, ImageChops
 
 
@@ -43,8 +43,8 @@ class RawData:
                 fullpath = os.path.join(self.h5_path, folder)
                 if os.path.isdir(fullpath):
                     self.total_prog += len(tuple(f for f in os.listdir(fullpath)
-                                                if f.lower().endswith(".pak") or f.lower().endswith(".h5m") or \
-                                                    f.lower().endswith(".h5u")))
+                                                 if f.lower().endswith(".pak") or f.lower().endswith(".h5m") or
+                                                 f.lower().endswith(".h5u")))
 
                 elif folder == "data":
                     raise ValueError(f"\"{self.h5_path}\"中没有找到\"{folder}\"")
@@ -56,7 +56,8 @@ class RawData:
 
         for folder in RawData.DIRS:
             fullpath = os.path.join(self.h5_path, folder)
-            if not os.path.isdir(fullpath): continue
+            if not os.path.isdir(fullpath):
+                continue
             with self.lock:
                 self.curr_stage = f"正在扫描{folder}文件夹"
 
@@ -77,7 +78,6 @@ class RawData:
                     except BadZipFile:
                         logging.info(f"  {folder}中的{f}并不是有效的压缩文件")
 
-
         self.zip_q = tuple(i[0] for i in sorted(temp, key=lambda x: x[1], reverse=True))
 
     def get_file(self, file_name):
@@ -90,7 +90,7 @@ class RawData:
 
     def get_progress(self):
         with self.lock:
-          return self.curr_prog / self.total_prog
+            return self.curr_prog / self.total_prog
 
     def get_stage(self):
         with self.lock:
@@ -118,11 +118,11 @@ class GameInfo:
         self.skill_info = None
         self.perk_info = None
         self.perk2skill = None
-        self.skill2perk = None
         self.skill_prob = None
         self.hero_info = None
         self.class2hero = None
         self.class2skill = None
+        self.class2skill_flat = None
         self.curr_stage = None
         self.ui = None
         self.offsets = None
@@ -133,18 +133,18 @@ class GameInfo:
     def run(self, data):
         RunInfo = namedtuple("RunInfo", ("xdb_path", "sub_func", "done_msg", "done_args"))
         run_info = (
-            RunInfo(GameInfo.SKILLS_XDB, self._parse_skills_xdb, 
+            RunInfo(GameInfo.SKILLS_XDB, self._parse_skills_xdb,
                     "解析完毕，加载了{}个主技能，{}个子技能",
-                    (lambda : len(self.skill_info), lambda : sum([len(i) for i in self.perk_info.values()]))),
+                    (lambda: len(self.skill_info), lambda: sum([len(i) for i in self.perk_info.values()]))),
             RunInfo(GameInfo.HEROCLASS_XDB, self._parse_heroclass_xdb,
                     "解析完毕，发现{}个职业，一共{}种主技能技能概率",
-                    (lambda : len(self.class_info), lambda: sum([len(i) for i in self.skill_prob.values()]))),
+                    (lambda: len(self.class_info), lambda: sum([len(i) for i in self.skill_prob.values()]))),
             RunInfo(GameInfo.HEROSCREEN3_XDB, self._parse_ui_xdb,
                     "解析完毕，加载了{}个UI部件",
-                    (lambda : 0, )),
+                    (lambda: 0, )),
             RunInfo(GameInfo.ANY_XDB, self._parse_hero_xdb,
                     "解析完毕，加载了{}个英雄",
-                    (lambda : len(self.hero_info), ))
+                    (lambda: len(self.hero_info), ))
         )
 
         for info in run_info:
@@ -227,6 +227,7 @@ class GameInfo:
         self.skill_prob = {}
         self.class_info = OrderedDict()
         self.class2skill = {}
+        self.class2skill_flat = {}
 
         for i in root[0]:
             class_id = i.find("ID").text
@@ -246,11 +247,17 @@ class GameInfo:
                         logging.info(f"    目前职业技能{skill_id}的概率是{prob}")
                         if class_id not in self.class2skill:
                             self.class2skill[class_id] = OrderedDict()
+                            self.class2skill_flat[class_id] = OrderedDict()
                         if skill_id not in self.class2skill[class_id]:
                             self.class2skill[class_id][skill_id] = (set(), set())
+                            self.class2skill_flat[class_id][skill_id] = []
 
         # Populate self.class2skill
         for pid, pinfo in self.perk_info.items():
+            for c in self.class2skill_flat:
+                if self.perk2skill[pid] in self.class2skill_flat[c]:
+                    self.class2skill_flat[c][self.perk2skill[pid]].append(pid)
+
             if pinfo.typ in ("SKILLTYPE_STANDART_PERK", "SKILLTYPE_CLASS_PERK"):
                 for c in self.class2skill:
                     if self.perk2skill[pid] in self.class2skill[c]:
@@ -262,13 +269,16 @@ class GameInfo:
                         if self.perk2skill[pid] in self.class2skill[c]:
                             self.class2skill[c][self.perk2skill[pid]][1].add(pid)
 
+        for c in self.class2skill_flat:
+            for s in self.class2skill_flat[c]:
+                self.class2skill_flat[c][s] = tuple(self.class2skill_flat[c][s])
+
     def _parse_skills_xdb(self, data):
         root = ET.fromstring(data.get_file(self.SKILLS_XDB))
         with self.lock:
             self.curr_prog += 1
         self.skill_info = {}
         self.perk_info = {}
-        self.skill2perk = {}
         self.perk2skill = {}
 
         for i in root[0]:
@@ -285,8 +295,10 @@ class GameInfo:
                     names = _f("NameFileRef", self._parse_txt)
                     name = []
                     for i in range(len(names[0]) - 1, -1, -1):
-                        if names[0][i] == names[1][i]: name.insert(0, names[0][i])
-                        else: break
+                        if names[0][i] == names[1][i]:
+                            name.insert(0, names[0][i])
+                        else:
+                            break
                     name = "".join(name[1:])
                     descs = tuple(_preproc_br(i) for i in _f("DescriptionFileRef", self._parse_txt))
                     self.skill_info[sp_id] = GameInfo.SkillInfo(names, descs, icons, name)
@@ -294,9 +306,6 @@ class GameInfo:
 
                 else:
                     perk_skill = ele.find("BasicSkillID").text
-                    if perk_skill not in self.skill2perk:
-                        self.skill2perk[perk_skill] = set()
-                    self.skill2perk[perk_skill].add(sp_id)
                     self.perk2skill[sp_id] = perk_skill
 
                     def _f(x, f): return f(x.get("href"), self.SKILLS_XDB, data)
@@ -347,8 +356,8 @@ class GameInfo:
         heromeet_ele = heromeet_ele.find("Children")[0]
         offsets["bg"] = (-offsets["bg"][0], -offsets["bg"][1])
         # Load HeroMeet related into memory
-        offset, heromeet_ele, heromeet_xdb_path = self._parse_shared_from_simple(heromeet_ele.get("href"),
-                                                                                heromeet_xdb_path, data)
+        offset, heromeet_ele, heromeet_xdb_path = \
+            self._parse_shared_from_simple(heromeet_ele.get("href"), heromeet_xdb_path, data)
         heromeet_ele = heromeet_ele.find("Children")
         offsets["bg"] = (offsets["bg"][0] - offset[0], offsets["bg"][1] - offset[1])
 
@@ -392,7 +401,7 @@ class GameInfo:
         ui["bg"] = cated
         offsets["abilities_crop2"] = (-rect2[0], -rect2[1])
 
-        # Load SelfHero 
+        # Load SelfHero
         # Note: SelfHero has no effect, SelfHero2 is the real one
         # in HeroScreen3.(WindowScreenShared)
         offsets["self"], hero_ele, hero_xdb_path = \
@@ -517,7 +526,7 @@ class GameInfo:
         offset_src = GameInfo.OffsetInfo(**_offset_routine(offsets["self"]))
         offset_dst = GameInfo.OffsetInfo(**_offset_routine(offsets["meet"]))
 
-        self.offsets = {"src": offset_src, "dst":offset_dst}
+        self.offsets = {"src": offset_src, "dst": offset_dst}
 
     def _parse_hero_xdb(self, data):
         root = ET.fromstring(data.get_file(GameInfo.ANY_XDB))
@@ -533,18 +542,23 @@ class GameInfo:
             hero_name = self._parse_txt(hero_ele.find("Editable").find("NameFileRef").get("href"),
                                         hero_xdb_path, data)
             hero_face = self._parse_dds(hero_ele.find("FaceTexture").get("href"), hero_xdb_path, data)
-            hero_id =hero_ele.find("InternalName").text
+            hero_id = hero_ele.find("InternalName").text
 
             def _mastery2int(mastery):
-                if mastery == "MASTERY_BASIC": return 1
-                elif mastery == "MASTERY_ADVANCED": return 2
-                elif mastery == "MASTERY_EXPERT": return 3
-                else: return 0
+                match mastery:
+                    case "MASTERY_BASIC":
+                        return 1
+                    case "MASTERY_ADVANCED":
+                        return 2
+                    case "MASTERY_EXPERT":
+                        return 3
+                    case _:
+                        return 0
 
             race_skills = {hero_ele.find("PrimarySkill").find("SkillID").text:
-                            _mastery2int(hero_ele.find("PrimarySkill").find("Mastery").text)}
+                           _mastery2int(hero_ele.find("PrimarySkill").find("Mastery").text)}
             hero_skills = hero_ele.find("Editable").find("skills")
-            hero_skills = [(i.find("SkillID").text, _mastery2int(i.find("Mastery").text)) 
+            hero_skills = [(i.find("SkillID").text, _mastery2int(i.find("Mastery").text))
                            for i in hero_skills
                            if i.find("SkillID").text in self.skill_info]
 
@@ -560,7 +574,8 @@ class GameInfo:
 
         for i in root:
             hero = GameInfo.HeroInfo(*_read_hero(i.get("href")))
-            if hero.id in self.hero_info: continue
+            if hero.id in self.hero_info:
+                continue
             self.hero_info[hero.id] = hero
             if hero.race not in self.class2hero:
                 self.class2hero[hero.race] = []
@@ -577,5 +592,3 @@ class GameInfo:
     def get_stage(self):
         with self.lock:
             return self.curr_stage
-
-

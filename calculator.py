@@ -14,7 +14,19 @@ class Hero():
         self._id = hero_info.id
         self.reload_skills(hero_info.skills, hero_info.perks)
         self._level = level
-        self._history = {}
+        self._history = []
+
+    def __str__(self):
+        return "L{}--{}\n  {}".format(
+            self._level, gg.info.hero_info[self._id].name,
+            "\n  ".join(Hero._output_line(i, lambda x: gg.info.skill_info[x].name,
+                                          lambda x: gg.info.perk_info[x].name)
+                        for i in self._skills.items()))
+
+    def __repr__(self):
+        return "L{}--{}\n{}".format(
+            self._level, self._id,
+            "\n".join(Hero._output_line(i, lambda x: x.split("HERO_SKILL_")[1]) for i in self._skills.items()))
 
     def __copy__(self):
         cls = self.__class__
@@ -30,16 +42,65 @@ class Hero():
             setattr(result, k, deepcopy(v, memo))
         return result
 
+    def _get_keys(self):
+        return frozenset(self._perks_set), \
+            frozenset(zip(self._skills.keys(), tuple(self._skills[i][0] for i in self._skills)))
+
+    def __hash__(self):
+        return hash(self._get_keys())
+
+    def __eq__(self, other):
+        return self._get_keys() == other._get_keys()
+
+    def __ge__(self, other):
+        return self._perks_set >= other._perks_set and set(self._skills.keys()) >= set(other._skills.keys()) and \
+            all(self._skills[i][0] >= other._skills[i][0] for i in self._skills if i in other._skills)
+
+    def __le__(self, other):
+        return self._perks_set <= other._perks_set and set(self._skills.keys()) <= set(other._skills.keys()) and \
+            all(self._skills[i][0] <= other._skills[i][0] for i in self._skills if i in other._skills)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __gt__(self, other):
+        return self.__ge__(other) and self.__ne__(other)
+
+    def __lt__(self, other):
+        return self.__le__(other) and self.__ne__(other)
+
+    @staticmethod
+    def _calc_prob(items, target, tries=1, prob_mat=None):
+        result = 0
+        print(items)
+        if prob_mat is None:
+            result = 1/len(items)
+            return result + (0 if tries == 1 else (1-result) * 1/(len(items) - 1))
+        else:
+            result = prob_mat[items.index(target)] / sum(prob_mat)
+            print(result)
+            return result + \
+                (sum(Hero._calc_prob(items, i, prob_mat=prob_mat) *
+                     Hero._calc_prob(
+                        [j for j in items if j != i], target,
+                        prob_mat=[prob_mat[j] for j in range(len(prob_mat)) if j != items.index(i)])
+                 for i in items if i != target) if tries != 1 else 0)
+
+    @staticmethod
+    def _output_line(line, sfunc, pfunc):
+        sid, (mastery, perks) = line
+        return "{}-{}: [{}]".format(sfunc(sid), mastery, ", ".join(pfunc(i) for i in perks))
+
+    @staticmethod
+    def _list_num_perks(perk_list):
+        return len([i for i in perk_list if gg.info.perk_info[i].typ != "SKILLTYPE_UINQUE_PERK"])
+
     def _self_num_perks(self, skill_id):
         if skill_id not in self._skills:
             return None
         else:
             result = len([i for i in self._skills[skill_id][1] if gg.info.perk_info[i].typ != "SKILLTYPE_UINQUE_PERK"])
             return result
-
-    @staticmethod
-    def _list_num_perks(perk_list):
-        return len([i for i in perk_list if gg.info.perk_info[i].typ != "SKILLTYPE_UINQUE_PERK"])
 
     def _build_remove_order(self, skill):
         result = []
@@ -78,7 +139,7 @@ class Hero():
         skill_need = {}
         for preq in preqs:
             if preq not in self._perks_set:
-                skill_id = gg.info.perk2skill[preq] 
+                skill_id = gg.info.perk2skill[preq]
                 if skill_id not in skill_need:
                     skill_need[skill_id] = []
                 skill_need[skill_id].append(preq)
@@ -115,8 +176,8 @@ class Hero():
                         "、".join(gg.info.perk_info[p].name for p in skill_need[skill]),
                         gg.info.skill_info[skill].name))
         if empty_skills < len(new_skills_need):
-            result.append(f"该英雄只有{empty_skills}主技能空槽，但是需要学习" + \
-                          "{}".format("、".join(new_skills_need)) + \
+            result.append(f"该英雄只有{empty_skills}主技能空槽，但是需要学习" +
+                          "{}".format("、".join(new_skills_need)) +
                           f"这{len(new_skills_need)}个主技能")
         return result
 
@@ -144,7 +205,8 @@ class Hero():
         levels_removed = 0
 
         if old_skill is None:
-            if perks is None: perks = []
+            if perks is None:
+                perks = []
             levels_added = skill[1] + len(perks)
             self._skills[skill[0]] = [skill[1], perks]
         elif skill is None:
@@ -228,7 +290,7 @@ class Hero():
                 if len(other._skills) >= 6:
                     break
                 skill = (sid, max(other._skills[sid][0], slvl) if sid in other._skills else slvl)
-                other.replace_skill(sid if sid in other._skills else None, skill, None) 
+                other.replace_skill(sid if sid in other._skills else None, skill, None)
 
             for perks in o_perks:
                 for pid in perks:
@@ -298,8 +360,8 @@ class Hero():
         else:
             new = [i for i in gg.info.class2skill[self._race] if i not in self._skills]
             new_probs = [gg.info.skill_prob[self._race][i]
-                        for i in gg.info.class2skill[self._race] if i not in self._skills]
-        
+                         for i in gg.info.class2skill[self._race] if i not in self._skills]
+
         old = [i for i in self._skills if self._skills[i][0] < 3]
         return new, new_probs, old
 
@@ -308,19 +370,53 @@ class Hero():
         standard = []
         for sid, (mastery, perks) in self._skills.items():
             if mastery > len(perks):
-                standard.extend([i for i in gg.info.skill2perk[sid] if i not in self._perks_set])
+                standard.extend([i for i in gg.info.class2skill[self._race][sid][0] if i not in self._perks_set])
+                special.extend([i for i in gg.info.class2skill[self._race][sid][1]
+                                if i not in self._perks_set and
+                                gg.info.perk_info[i].preq[self._race].issubset(self._perks_set)])
             elif mastery == len(perks) and sid == next(iter(self._skills.keys())):
-                standard.extend([i for i in gg.info.skill2perk[sid]
-                                 if i not in self._perks_set and gg.info.perk_info[i].typ == "SKILLTYPE_UINQUE_PERK"])
-        pprint(standard)
-
+                special.extend([i for i in gg.info.class2skill[self._race][sid][1]
+                                if i not in self._perks_set and
+                                gg.info.perk_info[i].preq[self._race].issubset(self._perks_set) and
+                                gg.info.perk_info[i].typ == "SKILLTYPE_UINQUE_PERK"])
         return standard, special
 
-    def calculate(self, buffer_level=0, new_skills=True):
-        a, b, c = self.get_levelup_skills()
-        a, b = self.get_levelup_perks()
-        #pprint(a)
-        #pprint(b)
+    def levelup(self, id):
+        result = deepcopy(self)
+        if id in gg.info.skill_info:
+            if id not in result._skills:
+                result._skills[id] = [1, []]
+            else:
+                result._skills[id][0] += 1
+        else:
+            result._perks_set.add(id)
+            result._skills[gg.info.perk2skill[id]][1].append(id)
+
+        result._level += 1
+        result._history.append(id)
+        return result
+
+    def leveldown(self):
+        if len(result._history) == 0:
+            return None
+        result = deepcopy(self)
+        id = result._history.pop()
+        result._level -= 1
+        if id in gg.info.skill_info:
+            if result._skills[id][0] == 1:
+                del result._skills[id]
+            else:
+                result._skills[id][0] -= 1
+        else:
+            result._perks_set.remove(id)
+            result._skills[gg.info.perk2skill[id]][1].remove(id)
+        return result
+
+    def calculate(self, dst, buffer_level=0, new_skills=True):
+        print(Hero._calc_prob(list(range(10)), 1, tries=2))
+        items = ["cat", "dog", "pig"]
+        prob = [2, 1, 1]
+        print(Hero._calc_prob(items, "cat", 2, prob))
 
     @property
     def race(self):
