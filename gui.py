@@ -315,8 +315,8 @@ class InteractiveCanvas(Canvas):
         self.ui_hero["src"].hero_select(hero_id)
         self.ui_hero["dst"].brother = self.ui_hero["src"]
 
-    def calculate(self, buffer_level=0, new_skills=True):
-        self.ui_hero["src"].hero.calculate(self.ui_hero["dst"].hero, buffer_level, new_skills)
+    def calculate(self, buffer_level=0, new_perks=True, new_skills=True):
+        self.ui_hero["src"].hero.calculate(self.ui_hero["dst"].hero, buffer_level, new_perks, new_skills)
 
 
 class LogWnd(Toplevel):
@@ -406,9 +406,11 @@ class MainWnd(Tk):
         self._on_menu_showlog()
 
     def _on_menu_calculate(self):
+        # TODO
         buffer_level = 0
+        new_perks = True
         new_skills = True
-        self.interactive_canvas.calculate(buffer_level, new_skills)
+        self.interactive_canvas.calculate(buffer_level, new_perks, new_skills)
 
     def _on_menu_showlog(self, event=None):
         if per.show_log:
@@ -434,7 +436,7 @@ class MainWnd(Tk):
         self.withdraw()
         #h5_path = filedialog.askdirectory(title="请选择英雄无敌5安装文件夹", initialdir=per.last_path)
 
-        h5_path = "D:\\games\\TOE31\\"
+        h5_path = "F:\\games\\TOE31\\"
         if h5_path == "":
             messagebox.showerror(TITLE, "本程序依赖已安装的英雄无敌5游戏数据！\n无游戏数据，退出。")
             return self.on_close()

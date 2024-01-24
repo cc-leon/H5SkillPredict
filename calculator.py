@@ -1,6 +1,9 @@
 from pprint import pprint
 from copy import deepcopy
 from collections import OrderedDict
+from threading import Lock
+import logging
+
 
 import data_parser as gg
 
@@ -15,6 +18,8 @@ class Hero():
         self.reload_skills(hero_info.skills, hero_info.perks)
         self._level = level
         self._history = []
+        self.prog = 0.0
+        self.lock = Lock()
 
     def __str__(self):
         return "L{}--{}\n  {}".format(
@@ -26,7 +31,9 @@ class Hero():
     def __repr__(self):
         return "L{}--{}\n{}".format(
             self._level, self._id,
-            "\n".join(Hero._output_line(i, lambda x: x.split("HERO_SKILL_")[1]) for i in self._skills.items()))
+            "\n".join(Hero._output_line(i, lambda x: x.split("HERO_SKILL_")[1],
+                                        lambda x: x.split("HERO_SKILL_")[1])
+                      for i in self._skills.items()))
 
     def __copy__(self):
         cls = self.__class__
@@ -39,18 +46,17 @@ class Hero():
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            setattr(result, k, deepcopy(v, memo))
+            if k != "lock":
+                setattr(result, k, deepcopy(v, memo))
         return result
 
     def _get_keys(self):
         return frozenset(self._perks_set), \
             frozenset(zip(self._skills.keys(), tuple(self._skills[i][0] for i in self._skills)))
 
-    def __hash__(self):
-        return hash(self._get_keys())
+    def __hash__(self): return hash(self._get_keys())
 
-    def __eq__(self, other):
-        return self._get_keys() == other._get_keys()
+    def __eq__(self, other): return self._get_keys() == other._get_keys()
 
     def __ge__(self, other):
         return self._perks_set >= other._perks_set and set(self._skills.keys()) >= set(other._skills.keys()) and \
@@ -60,25 +66,23 @@ class Hero():
         return self._perks_set <= other._perks_set and set(self._skills.keys()) <= set(other._skills.keys()) and \
             all(self._skills[i][0] <= other._skills[i][0] for i in self._skills if i in other._skills)
 
-    def __ne__(self, other):
-        return not self.__eq__(other)
+    def __ne__(self, other): return not self.__eq__(other)
 
-    def __gt__(self, other):
-        return self.__ge__(other) and self.__ne__(other)
+    def __gt__(self, other): return self.__ge__(other) and self.__ne__(other)
 
-    def __lt__(self, other):
-        return self.__le__(other) and self.__ne__(other)
+    def __lt__(self, other): return self.__le__(other) and self.__ne__(other)
 
     @staticmethod
     def _calc_prob(items, target, tries=1, prob_mat=None):
         result = 0
-        print(items)
+        if len(items) == 1:
+            return 1.0
+
         if prob_mat is None:
             result = 1/len(items)
             return result + (0 if tries == 1 else (1-result) * 1/(len(items) - 1))
         else:
             result = prob_mat[items.index(target)] / sum(prob_mat)
-            print(result)
             return result + \
                 (sum(Hero._calc_prob(items, i, prob_mat=prob_mat) *
                      Hero._calc_prob(
@@ -391,7 +395,6 @@ class Hero():
         else:
             result._perks_set.add(id)
             result._skills[gg.info.perk2skill[id]][1].append(id)
-
         result._level += 1
         result._history.append(id)
         return result
@@ -412,11 +415,58 @@ class Hero():
             result._skills[gg.info.perk2skill[id]][1].remove(id)
         return result
 
-    def calculate(self, dst, buffer_level=0, new_skills=True):
-        print(Hero._calc_prob(list(range(10)), 1, tries=2))
-        items = ["cat", "dog", "pig"]
-        prob = [2, 1, 1]
-        print(Hero._calc_prob(items, "cat", 2, prob))
+    def calculate(self, dst, buffer_level=0, new_perks=True, new_skills=True):
+        def _levelup(src, dst, root, prob, prog, hist, buffer_level, new_perks=True, new_skills=True):
+            if src >= dst:
+                hist[src] = prob
+                with root.lock:
+                    root.prog += prog
+                return prob
+            elif src.level - buffer_level - dst.level == 0:
+                hist[src] = 0
+                with root.lock:
+                    root.prog += prog
+                return 0
+            else:
+                if src in hist:
+                    with root.lock:
+                        root.prog += prog
+                    #return hist[src]
+
+                new_skills, new_probs, old_skills = src.get_levelup_skills()
+                standard_perks, special_perks = src.get_levelup_perks()
+                options = []
+
+                old_tries = 2 if len(new_skills) == 0 and len(old_skills) != 0 else 1
+                new_tries = 2 if len(new_skills) != 0 and len(old_skills) == 0 else 1
+                new_cond = (lambda _: True) if new_skills is True else (lambda x: x in dst._skills)
+                options.extend(zip((i for i in new_skills if new_cond(i)),
+                                   (Hero._calc_prob(new_skills, i, new_tries, new_probs) for i in new_skills
+                                   if new_cond(i))))
+                options.extend(zip(old_skills, (Hero._calc_prob(old_skills, i, old_tries) for i in old_skills)))
+
+                special_tries = 2 if len(standard_perks) == 0 and len(special_perks) != 0 else 1
+                standard_tries = 2 if len(standard_perks) != 0 and len(special_perks) == 0 else 1
+                new_cond = (lambda _: True) if new_perks is True else (lambda x: x in dst._perks_set)
+                options.extend(zip((i for i in standard_perks if new_cond(i)),
+                                   (Hero._calc_prob(standard_perks, i, standard_tries) for i in standard_perks
+                                   if new_cond(i))))
+                options.extend(zip((i for i in special_perks if new_cond(i)),
+                                   (Hero._calc_prob(special_perks, i, special_tries) for i in special_perks
+                                   if new_cond(i))))
+
+                result = 0.0
+                for i in options:
+                    # src, dst, root, prob, prog, hist, buffer_level, new_perks=True, new_skills=True
+                    result += _levelup(src.levelup(i[0]), dst, self, prob * i[1], prog / len(options), hist,
+                                       buffer_level, new_perks, new_skills)
+                hist[src] = result
+                logging.info(str((src._history, result)))
+                return result
+
+        hist = {}
+        a = _levelup(self, dst, self, 1.0, 1.0, hist, buffer_level=1, new_perks=True, new_skills=False)
+        print(a)
 
     @property
     def race(self):
